@@ -1,189 +1,332 @@
 #!/bin/bash
 
-# This script automates the setup and configuration of Gentoo Linux for the PlayStation 3 (PS3).
-# It includes disk partitioning, filesystem creation, package installation, and system configuration.
-# Customize the variables in the CONFIGURATION section to tailor the installation to your needs.
-# Note: A configured OtherOS or OtherOS++ environment, Petitboot, and a running Linux environment on the PS3 are required for executing this script.
-# You can use Live Gentoo USB to utilize the installation script.
-# Warning: Running this script will result in the erasure of all data on the specified disk.
+# HELPER VARIABLES ==============================================================================
 
-# Read variables.
+title='GENTOO LINUX INSTALLER'
+dir="$(pwd)" # Current directory where script was called from.
+branch="main"
+url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
+path_tmp="$dir/_gentoo_tmp_files" # Temporary files storage directory.
+path_chroot="$dir/_gentoo_chroot" # Gentoo chroot environment directory.
+quiet_flag='--quiet'              # Quiet flag used to silence the output.
+quiet_flag_short='-q'             # Quiet flag used to silence the output.
+ssh_distcc_host_timeout=600       # Timeout for SSH when updating distcc host configuration.
+ssh_distcc_host_user='root'       # Username for SSH when updating distcc host configuration. Can change with --distcc-user flag.
 
-declare disk_device # [/dev/ps3dd / /dev/ps3da / dev/sda] For OtherOS++ use ps3dd, for OtherOS ps3da. To install on USB drive, use sda.
-declare config # TODO: Store config in seperate files, and load over HTTP.
+# MAIN PROGRAM ==================================================================================
 
-# ###############################################################################################
-# CONFIGURATION =================================================================================
-# ###############################################################################################
+## Prepare -------------------------------------------------------------------------------------
+source <(sed '1,/^# FUNCTIONS #.*$/d' "$0") # Load functions at the bottom of the script.
 
-arch='ppc64' # For the PS3 always use ppc64.
-init_system='openrc' # [openrc/systemd]. Currently works only with openrc.
-profile="default/linux/$arch/17.0" # Customize is you want the GUI.
-base_url='https://distfiles.gentoo.org/releases/ppc/autobuilds'
+read_variables "$@"    # Read user input variables - device, configuration, verbose.
+validate_input_data    # Validate if input data is correct.
+warn_about_disk_wiping # Asks user to confirm disk formatting is applying.
 
-disk_scheme='gpt' # [gpt/dos]. Suggest using gpt.
+log magneta "$title started"
 
-hostname='PS3'
-root_password='' # Empty string means remove password.
-locale='en_US.utf8' # Default locale. Please include also in locales.
+prepare_directories            # Create path_tmp and path_chroot.
+get_config                     # Download configuration or load local configuration file.
+validate_config                # Checks if all settings in configuration are set correctly.
+sort_partitions_by_mount_order # Prepare array of devices sorted by mounting order.
 
-ssh_allow_root=true # Enable root login through SSH.
-ssh_allow_passwordless=true # Enable logging in without password if user doesn't have one.
+## Setup disk -----------------------------------------------------------------------------------
+disk_clean_signatures   # Remove existing signatures of partition table, and partitions from the disk.
+disk_create_partitions  # Create new partitions, definied in the configuration.
+disk_create_filesystems # Create filesystems definied in the configuration.
 
-kernel_version='6.5.4'
+## Mount partitions -----------------------------------------------------------------------------
+disk_mount_partitions # Mount new partitions to temporary locations in chroot.
 
-## Partitions -----------------------------------------------------------------------------------
+## Download and extract stage3 ------------------------------------------------------------------
+stage3_download # Download newest Stage3 tarball.
+stage3_extract  # Extract Stage3 tarball to chroot directory.
 
-declare -a disk_partitions=( # index:mount_order:file_system:mount_point:size:options:dump:pass.
-    1:1:ext3:/boot:+256MiB:defaults,noatime:1:2 # BOOT. Don`t use ext4 for boot, petitboot won`t detect it
-    2:0:btrfs:/:-4100MiB:defaults,noauto:0:1 # ROOT
-    3:2:swap:none:+4GiB:sw:0:0 # SWAP
-)
+## Prepare for chroot ---------------------------------------------------------------------------
+prepare_chroot # Mount devices required for chroot to work and copies resolve.conf.
 
-## Locales --------------------------------------------------------------------------------------
+## Portage configuration ------------------------------------------------------------------------
+setup_make_conf       # Configure make.conf flags.
+setup_packages_config # Configure package.use, package.accep_keywords.
 
-declare -a locales=(
-    'en_US ISO-8859-1'
-    'en_US.UTF-8 UTF-8'
-)
+## Various configs ------------------------------------------------------------------------------
+setup_root_password # Sets root password to selected.
+setup_fstab         # Generates fstab file from configuration.
+setup_hostname      # Sets hostname.
+setup_network       # Setup network devices links and configs.
+setup_ssh           # Configure SSH access.
+setup_main_repo     # Creates empty directory, removes warning before syncing portage.
 
-## Make conf ------------------------------------------------------------------------------------
+## Setup PS3 Gentoo internal chroot environment -------------------------------------------------
+update_environment          # Refreshing env variables.
+setup_locales               # Generate locales and select default one.
+setup_portage_repository    # Downloads latest portage tree.
+setup_profile               # Changes profile to selected.
+setup_cpu_flags             # Downloads and uses cpuid2cpuflags to generate flags for current CPU.
+install_base_tools          # Installs tools needed at early stage.
+setup_distcc_client         # Downloads and configures distcc if used.
+install_kernel              # Installs selected type of kernel.
+install_updates             # Updates and rebuilds @world and @system including new use flags.
+install_other_tools         # Installs other selected tools.
+install_custom_init_scripts # Downloads and installs custom init scripts. # TODO: Replace with custom portage repository.
+setup_autostart             # Adds init scripts to selected runlevels.
+setup_bootloader_config     # Configures kboot and/or grub.
+setup_scripts               # Runs extra scripts, definied in config scripts array.
 
-declare -A make_conf=(
-    [COMMON_FLAGS]='-O2 -pipe -mcpu=cell -mtune=cell -mabi=altivec -maltivec'
-    [USE]='ps3 zeroconf mdnsresponder-compat'
-    [MAKEOPTS]='-j6 -l2' # If not using distcc, use -j3.
-    [ACCEPT_LICENSE]='*' # Automatically accept all licenses.
-    [FEATURES]='distcc'
-)
+## Cleanup and exit -----------------------------------------------------------------------------
+revdep_rebuild          # Fixes broken dependencies.
+reset_distcc            # Restore distcc to localhost only if this option is selected.
+cleanup                 # Cleans unneded files.
+unprepare_chroot        # Unmounts devices and removed DNS configuration.
+disk_unmount_partitions # Unmounts partitions.
+cleanup_directories     # Removes temporart installation files.
+summary                 # Show summary information if applicable.
 
-## Packages and tools ---------------------------------------------------------------------------
+## Summary --------------------------------------------------------------------------------------
+log green "$title done"
 
-declare -A package_use=(
-    [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
-)
+exit
 
-declare -A package_accept_keywords=(
-    [app-misc_ps3pf_utils]='app-misc/ps3pf_utils ~ppc64'
-)
+# FUNCTIONS # ===================================================================================
 
-declare -a guest_tools=(
-    app-admin/sysklogd
-    app-portage/gentoolkit
-    net-misc/ntp
-    app-misc/ps3pf_utils
-    sys-devel/distcc
-    net-dns/avahi
-)
+log() {
+    local color="$1"
+    shift
+    local msg="$@"
+    local color_value
+    case "$color" in
+    'black') color_value="30" ;;
+    'red') color_value="31" ;;
+    'green') color_value="32" ;;
+    'yellow') color_value="33" ;;
+    'blue') color_value="34" ;;
+    'magneta') color_value="35" ;;
+    'cyan') color_value="36" ;;
+    'white') color_value="37" ;;
+    *) color_value="37" ;;
+    esac
+    echo -e "\033[0;${color_value}m[ $msg ]\033[0m"
+}
 
-declare -A guest_rc_startup=(
-    [boot]='net.eth0'
-    [default]='sysklogd sshd ntpd ntp-client avahi-daemon'
-)
+error() {
+    log red "$@"
+    exit
+}
 
-# ###############################################################################################
-# Helper functions ==============================================================================
-# ###############################################################################################
+error_continue() {
+    log red "$@"
+    local prompt="c - continue; e - exit; r - repeat: "
+    local response
 
-quiet_flag='--quiet'
-quiet_flag_short='-q'
+    while true; do
+        read -p "$prompt" response
+        case "$response" in
+        "c" | "continue")
+            break
+            ;;
+        "e" | "exit")
+            exit 1
+            ;;
+        "r" | "repeat")
+            try "$@"
+            break
+            ;;
+        *) ;;
+        esac
+    done
+}
 
-quiet() {
-    if [ -n "$quiet_flag" ]
-    then
+try() {
+    log cyan "$@"
+    if [ -n "$quiet_flag" ]; then
         "$@" > /dev/null
     else
         "$@"
     fi
-}
-
-welcome() {
-    printf "\033[1;36m[ $title started ]\033[0m\n"
-}
-
-message() {
-    printf "\033[0;33m> $@\033[0m\n"
-}
-
-summary() {
-    printf "\033[1;4;32m[ $title done ]\033[0m\n"
-}
-
-error() {
-    printf "\033[1;31m$@\033[0m\n"
-    exit
-}
-
-try() {
-    "$@"
     local exit_code=$?
     if [ $exit_code -ne 0 ]; then
-        error "[ $title failed ]"
-        exit $exit_code
+        error_continue "$@"
     fi
 }
 
 print_usage() {
-    message "Usage: $0 --device <device> --config <config> [-v]"
+    echo "Usage: $0 [OPTIONS]"
+    echo "Options:"
+    echo "  --device <device>                 Specify the device to use."
+    echo "  --directory <directory>           Specify the directory to work in."
+    echo ""
+    echo "  --config <remote_config>          Use a remote configuration."
+    echo "  --custom-config <config_file>     Use a custom configuration file."
+    echo ""
+    echo "  --verbose                         Enable verbose output."
+    echo ""
+    echo "  --distcc <host>                   Specify a distcc host."
+    echo "  --distcc-user <host_username>     Specify the username for distcc host."
+    echo "  --distcc-password <host_password> Specify the password for distcc host."
+    echo "  --distcc-oneshot                  Restart distcc configuration to localhost only after intallation."
+    echo ""
+    echo "  --branch <branch_name>            Specify branch of install script, from which to get files. Default: main."
+    exit 1
 }
 
-# ###############################################################################################
-# FUNCTIONS =====================================================================================
-# ###############################################################################################
-
-### Helper variables
-title='BOOTSTRAP GENTOO LINUX FOR THE PS3'
-declare -a disk_partitions_sorted_by_mount_order # Will be filled by the script itself.
-declare url_gentoo_stage3 # Will be fetched for the newest available stage3.
-dir="$(pwd)" # Current directory where script was called from.
-path_chroot="$(pwd)/gentoo/chroot"
-path_tmp="$(pwd)/gentoo/tmp"
+chroot_call() {
+    try chroot "$path_chroot" '/bin/bash' -c "$@"
+}
 
 ## Disk preparation -----------------------------------------------------------------------------
 
-stage000_read_variables() {
-    while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -d|--device)
+read_variables() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --device)
             shift
-            if [[ $# -gt 0 ]]; then
+            if [ $# -gt 0 ]; then
                 disk_device="$1"
+                installation_type='disk'
             fi
             ;;
-        -c|--config)
+        --directory)
             shift
-            if [[ $# -gt 0 ]]; then
+            if [ $# -gt 0 ]; then
+                path_chroot="$1"
+                install_directory="$path_chroot"
+                installation_type='directory'
+            fi
+            ;;
+        --config)
+            shift
+            if [ $# -gt 0 ]; then
                 config="$1"
             fi
             ;;
-        -v|--verbose)
+        --custom-config)
+            shift
+            if [ $# -gt 0 ]; then
+                custom_config="$1"
+            fi
+            ;;
+        --verbose)
             unset quiet_flag
             unset quiet_flag_short
+            ;;
+        --distcc)
+            shift
+            if [ $# -gt 0 ]; then
+                distcc_hosts="$1"
+            fi
+            ;;
+        --distcc-user)
+            shift
+            if [ $# -gt 0 ]; then
+                ssh_distcc_host_user="$1"
+            fi
+            ;;
+        --distcc-password)
+            shift
+            if [ $# -gt 0 ]; then
+                ssh_distcc_host_password="$1"
+            fi
+            ;;
+        --distcc-oneshot)
+            distcc_oneshot=true
+            ;;
+        --branch)
+            shift
+            if [ $# -gt 0 ]; then
+                branch="$1"
+                url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
+            fi
             ;;
         *)
             error "Unknown option: $1"
             ;;
-    esac
-    shift
+        esac
+        shift
     done
 }
 
-stage000_validate_input_data() {
-    if [ -z "$disk_device" ]; then
+validate_input_data() {
+    # Validate if required properties are set.
+    if [ -z "$disk_device" ] && [ -z "$install_directory" ]; then
         print_usage
-        exit 1
     fi
-    if [ -z "$config" ]; then
+    if [ ! -z "$disk_device" ] && [ ! -z "$install_directory" ]; then
         print_usage
-        exit 1
+    fi
+    if [ -z "$config" ] && [ -z "$custom_config" ]; then
+        print_usage
+    fi
+    if [ ! -z "$config" ] && [ ! -z "$custom_config" ]; then
+        print_usage
+    fi
+
+    # Validate if disk is not being used.
+    if [ "$installation_type" = 'device' ] && [ ! -e "$disk_device" ]; then
+        error "Device $disk_device does not exists."
+    fi
+    if [ "$installation_type" = 'device' ] && [ lsblk -no MOUNTPOINT "$disk_device" | grep -q -v "^$" ]; then
+        error "Device $disk_device is currently in use. Unmount it before usage."
     fi
 }
 
-stage000_download_config() {
-    echo "Download config"
+warn_about_disk_wiping() {
+    if [ "$installation_type" = 'disk' ]; then
+        log red "WARNING! If you continue, disk $disk_device will be completly erased. Do you want to continue?"
+        local prompt="yes - continue and wipe disk; no - exit: "
+        local response
+
+        while true; do
+            read -p "$prompt" response
+            case "$response" in
+            "yes")
+                break
+                ;;
+            "no")
+                exit 1
+                ;;
+            *) ;;
+            esac
+        done
+    fi
 }
 
-stage000_sort_partitions_by_mount_order() {
+prepare_directories() {
+    if [ ! -d "$path_tmp" ]; then
+        try mkdir -p "$path_tmp"
+    fi
+    if [ ! -d "$path_tmp/scripts" ]; then
+        try mkdir -p "$path_tmp/scripts"
+    fi
+    if [ ! -d "$path_chroot" ]; then
+        try mkdir -p "$path_chroot"
+    fi
+}
+
+get_config() {
+    # Get config from the repository or local file.
+    local path_config="$path_tmp/config"
+    if [ -z "$custom_config" ]; then
+        local url_config="$url_repo/config/$config"
+        try wget "$url_config" -O "$path_config" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
+    else
+        try cp "$custom_config" "$path_config"
+    fi
+    try source "$path_config"
+}
+
+validate_config() {
+    # TODO: Validate more settings.
+    # Check if distcc is added to features.
+    if [ ! -z "$distcc_hosts" ]; then
+        if ! [[ -n "${make_conf[FEATURES]}" && "${make_conf[FEATURES]}" == *distcc* ]]; then
+            error "To use distcc host, configuration must include [FEATURES]='distcc' in make_conf."
+        fi
+    fi
+}
+
+sort_partitions_by_mount_order() {
+    if [ "$installation_type" != 'disk' ]; then
+        return
+    fi
     IFS=$'\n' read -r -d '' -a disk_partitions_sorted_by_mount_order < <(
         for partition in "${disk_partitions[@]}"; do
             echo "$partition"
@@ -191,31 +334,26 @@ stage000_sort_partitions_by_mount_order() {
     )
 }
 
-stage001_validate_disk() {
-    # Check if disk can be used for the installation.
-    # Validate if it's not currently mounted, and if device exists.
-    if [ ! -e "$disk_device" ]; then
-        error "Device $disk_device does not exists."
-    fi
-    if lsblk -no MOUNTPOINT "$disk_device" | grep -q -v "^$"; then
-        error "Device $disk_device is currently in use. Unmount it before usage."
-    fi
-}
-
-stage002_clean_signatures() {
+disk_clean_signatures() {
     # Cleans signatures from partition table and every partition.
+    if [ "$installation_type" != 'disk' ]; then
+        return
+    fi
     for partition in "$disk_device"*; do
         if [[ -b "$partition" && "$partition" != "$disk_device" ]]; then
-                try quiet wipefs -fa "$partition"
+            try wipefs -fa "$partition"
         fi
     done
-    try quiet wipefs -fa "$disk_device"
+    try wipefs -fa "$disk_device"
     try sleep 1 # Without sleep blockdev below sometimes fails
-    try quiet blockdev --rereadpt -v "$disk_device"
+    try blockdev --rereadpt -v "$disk_device"
 }
 
-stage003_create_partitions() {
+disk_create_partitions() {
     # Create partitions on device.
+    if [ "$installation_type" != 'disk' ]; then
+        return
+    fi
     local fdisk_command=''
 
     if [ "$disk_scheme" = 'gpt' ]; then
@@ -245,11 +383,14 @@ stage003_create_partitions() {
     done
     # Write new partition scheme
     fdisk_command="${fdisk_command}w\n"
-    printf "$fdisk_command" | try quiet fdisk "$disk_device" --wipe auto
+    printf "$fdisk_command" | try fdisk "$disk_device" --wipe auto
 }
 
-stage004_create_filesystems() {
+disk_create_filesystems() {
     # Creating filesystem for given configuration.
+    if [ "$installation_type" != 'disk' ]; then
+        return
+    fi
     create_filesystem_from_config() {
         local disk_device="$1"
         local partition_data="$2"
@@ -258,12 +399,12 @@ stage004_create_filesystems() {
         local partition_data_filesystem="${partition_data_fragments[2]}"
         local partition_device="${disk_device}${partition_data_index}"
         case "$partition_data_filesystem" in
-            'vfat' ) try quiet mkfs.vfat -F32 "$partition_device";;
-            'ext3' ) try quiet mkfs.ext3 -F $quiet_flag_short "$partition_device";;
-            'ext4' ) try quiet mkfs.ext4 -F $quiet_flag_short "$partition_device";;
-            'btrfs') try quiet mkfs.btrfs -f $quiet_flag_short "$partition_device";;
-            'swap' ) try quiet mkswap $quiet_flag_short "$partition_device";;
-            *      ) error "Unknown partition filesystem $partition_data_filesystem"
+        'vfat') try mkfs.vfat -F32 "$partition_device" ;;
+        'ext3') try mkfs.ext3 -F $quiet_flag_short "$partition_device" ;;
+        'ext4') try mkfs.ext4 -F $quiet_flag_short "$partition_device" ;;
+        'btrfs') try mkfs.btrfs -f $quiet_flag_short "$partition_device" ;;
+        'swap') try mkswap $quiet_flag_short "$partition_device" ;;
+        *) error "Unknown partition filesystem $partition_data_filesystem" ;;
         esac
     }
     for part_config in "${disk_partitions[@]}"; do
@@ -271,11 +412,10 @@ stage004_create_filesystems() {
     done
 }
 
-stage005_mount_partitions() {
-    if [ ! -d "$path_chroot" ]; then
-        try mkdir -p "$path_chroot"
+disk_mount_partitions() {
+    if [ "$installation_type" != 'disk' ]; then
+        return
     fi
-
     mount_filesystem_from_config() {
         local disk_device="$1"
         local partition_data="$2"
@@ -287,12 +427,12 @@ stage005_mount_partitions() {
         local partition_mount_path="$path_chroot$partition_data_mount_point"
         if [ "$partition_data_mount_point" != 'none' ]; then
             if [ ! -d "$partition_mount_path" ]; then
-                try quiet mkdir "$partition_mount_path"
+                try mkdir "$partition_mount_path"
             fi
-            try quiet mount "$partition_device" "$partition_mount_path"
+            try mount "$partition_device" "$partition_mount_path"
         fi
-        if [ "$partition_data_filesystem" = 'swap' ]; then
-            try quiet swapon "$partition_device"
+        if [ "$partition_data_filesystem" = 'swap' ] && [ $use_target_swap = true ]; then
+            try swapon "$partition_device"
         fi
     }
     for part_config in "${disk_partitions_sorted_by_mount_order[@]}"; do
@@ -300,38 +440,34 @@ stage005_mount_partitions() {
     done
 }
 
-# ###############################################################################################
 # Downloading files =============================================================================
-# ###############################################################################################
 
-stage100_get_stage3_url() {
-    local stageinfo_url="$base_url/latest-stage3.txt"
-    local latest_stage3_content="$(wget -q -O - "$stageinfo_url")"
+stage3_download() {
+    local path_stage3="$path_tmp/stage3.tar.xz"
+    local stageinfo_url="$base_url_autobuilds/latest-stage3.txt"
+    local latest_stage3_content="$(wget -q -O - "$stageinfo_url" --no-http-keep-alive --no-cache --no-cookies)"
     local latest_ppc64_stage3="$(echo "$latest_stage3_content" | grep "$arch-$init_system" | head -n 1 | cut -d' ' -f1)"
+    local url_gentoo_stage3
     if [ -n "$latest_ppc64_stage3" ]; then
-        url_gentoo_stage3="$base_url/$latest_ppc64_stage3"
+        url_gentoo_stage3="$base_url_autobuilds/$latest_ppc64_stage3"
     else
-        error "Failed to get Stage3 URL"
+        error "Failed to download Stage3 URL"
     fi
-}
-
-stage101_download_stage3() {
     # Download stage3 file
-    try quiet wget "$url_gentoo_stage3" -O "$path_chroot/stage3.tar.xz" $quiet_flag
+    try wget "$url_gentoo_stage3" -O "$path_stage3" $quiet_flag
 }
 
-stage102_extract_stage3() {
+stage3_extract() {
+    local path_stage3="$path_tmp/stage3.tar.xz"
     try cd "$path_chroot"
-    try quiet tar -xvpf 'stage3.tar.xz'
-    try rm 'stage3.tar.xz'
+    try tar -xvpf "$path_stage3" --xattrs-include="*/*" --numeric-owner
     try cd "$dir"
 }
 
-# ###############################################################################################
 # Configuring system ============================================================================
-# ###############################################################################################
 
-stage200_mount_devices() {
+prepare_chroot() {
+    # Mount required devices.
     try cd "$path_chroot"
     try mount --types proc /proc proc
     try mount --rbind /sys sys
@@ -341,13 +477,11 @@ stage200_mount_devices() {
     try mount --bind /run run
     try mount --make-slave run
     try cd "$dir"
-}
-
-stage201_copy_resolv_conf() {
+    # Copy DNS information.
     try cp --dereference '/etc/resolv.conf' "$path_chroot/etc/resolv.conf"
 }
 
-stage202_setup_make_conf() {
+setup_make_conf() {
     local path_make_conf="$path_chroot/etc/portage/make.conf"
     insert_config() {
         local key="$1"
@@ -355,7 +489,7 @@ stage202_setup_make_conf() {
         if grep -q "$key=" "$path_make_conf"; then
             try sed -i "s/^$key=.*/$key=\"$value\"/" "$path_make_conf"
         else
-            echo "$key=\"$value\"" | try tee -a "$path_make_conf" > /dev/null
+            echo "$key=\"$value\"" | try tee -a "$path_make_conf" >/dev/null
         fi
     }
     for key in "${!make_conf[@]}"; do
@@ -363,28 +497,24 @@ stage202_setup_make_conf() {
     done
 }
 
-stage203_setup_packages_use() {
+setup_packages_config() {
+    # USE
     local path_package_use="$path_chroot/etc/portage/package.use"
     for key in "${!_package_use[@]}"; do
-        echo "${package_use[$key]}" | try tee -a "$path_package_use/$key" > /dev/null
+        echo "${package_use[$key]}" | try tee -a "$path_package_use/$key" >/dev/null
     done
-}
-
-stage204_setup_package_accept_keywords() {
+    # Accept keywords
     local path_package_accept_keywords="$path_chroot/etc/portage/package.accept_keywords"
     for key in "${!package_accept_keywords[@]}"; do
-        echo "${package_accept_keywords[$key]}" | try tee -a "$path_package_accept_keywords/$key" > /dev/null
+        echo "${package_accept_keywords[$key]}" | try tee -a "$path_package_accept_keywords/$key" >/dev/null
     done
 }
 
-stage205_setup_locale() {
-    local path_make_conf="$path_chroot/etc/locale.gen"
-    for ((i=0; i < "${#locales[@]}"; i++)); do
-        echo "${locales[$i]}" | try tee -a "$path_make_conf" > /dev/null
-    done
-}
-
-stage206_setup_fstab() {
+setup_fstab() {
+    if [ "$installation_type" != 'disk' ]; then
+        log green 'Skipping fstab configuration due to directory installation'
+        return
+    fi
     local path_fstab="$path_chroot/etc/fstab"
     add_partition_entry() {
         local disk_device="$1"
@@ -399,19 +529,34 @@ stage206_setup_fstab() {
         local partition_device="${disk_device}${partition_data_index}"
         local partition_mount_path="$path_chroot$partition_data_mount_point"
         local entry="${partition_device} ${partition_data_mount_point} ${partition_data_filesystem} ${partition_data_flags} ${partition_data_dump} ${partition_data_pass}"
-        echo "$entry" | try tee -a "$path_fstab" > /dev/null
+        echo "$entry" | try tee -a "$path_fstab" >/dev/null
     }
     for part_config in "${disk_partitions_sorted_by_mount_order[@]}"; do
         add_partition_entry "$disk_device" "$part_config"
     done
 }
 
-stage207_setup_hostname() {
+setup_hostname() {
     local path_hostname="$path_chroot/etc/hostname"
-    echo "$hostname" | try tee "$path_hostname" > /dev/null
+    echo "$hostname" | try tee "$path_hostname" >/dev/null
 }
 
-stage208_install_kernel() {
+setup_distcc_client() {
+    if [ -z "$distcc_hosts" ]; then
+        return
+    fi
+    # USE='-zeroconf' is used to speed up installation the first time. Otherwise it will emerge avahi and all dependencies.
+    # This will be updated later with default flags.
+    chroot_call "FEATURES=\"-distcc\" USE='-zeroconf' emerge --update --newuse distcc $quiet_flag"
+    chroot_call "distcc-config --set-hosts '$distcc_hosts'"
+    update_distcc_host
+}
+
+install_kernel() {
+    # TODO: Install with custom repository.
+    if [ ! -n "$kernel_version" ]; then
+        return
+    fi
     local linux_filename="linux-$kernel_version.tar.xz"
     local url_linux_download="https://github.com/damiandudycz/ps3/raw/main/$linux_filename"
     local path_linux_download="$path_tmp/$linux_filename"
@@ -430,8 +575,8 @@ stage208_install_kernel() {
         try mkdir -p "$path_linux_extract"
     fi
 
-    try quiet wget "$url_linux_download" -O "$path_linux_download" $quiet_flag
-    try quiet tar -xvpf "$path_linux_download" --directory "$path_linux_extract"
+    try wget "$url_linux_download" -O "$path_linux_download" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
+    try tar -xvpf "$path_linux_download" --directory "$path_linux_extract"
 
     if [ ! -d "$path_chroot_modules" ]; then
         try mkdir -p "$path_chroot_modules"
@@ -441,41 +586,68 @@ stage208_install_kernel() {
     try cp "$path_kernel_initramfs" "$path_chroot_boot/initramfs-$kernel_version.img"
     try cp -r "$path_kernel_modules"/* "$path_chroot_modules"
 
-    try rm -rf "$path_linux_download" "$path_linux_extract"
+    update_distcc_host
 }
 
-stage209_setup_kboot_entry() {
-    local disk_device_name=$(echo "$disk_device" | rev | cut -d'/' -f1 | rev)
-
-    local root_index=0
-    local boot_index=0
-
-    # Find root and boot partition indexes
-    scan_partition_config() {
-        local disk_device="$1"
-        local partition_data="$2"
-        local partition_data_fragments=(${partition_data//:/ })
-        local partition_data_index=${partition_data_fragments[0]}
-        local partition_data_mount_point=${partition_data_fragments[3]}
-        if [ "$partition_data_mount_point" = '/' ]; then
-            root_index=$partition_data_index
-        fi
-        if [ "$partition_data_mount_point" = '/boot' ]; then
-            boot_index=$partition_data_index
-        fi
-    }
-    for part_config in "${disk_partitions[@]}"; do
-        scan_partition_config "$disk_device" "$part_config"
+install_custom_init_scripts() {
+    for script in "${guest_init_scripts[@]}"; do
+        # Download and install init script
+        local url_script="$url_repo/init.d/$script"
+        local path_script="$path_chroot/etc/init.d/$script"
+        try wget "$url_script" -O "$path_script" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
+        try chmod +x "$path_script"
     done
-    if [ $boot_index -eq 0 ]; then
-        boot_index=$root_index
-    fi
-
-    local kboot_entry1="$hostname='${disk_device_name}${boot_index}:/vmlinux-$kernel_version initrd=${disk_device_name}${boot_index}:/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
-    echo "$kboot_entry1" | try tee "$path_chroot/boot/kboot.conf" > /dev/null
 }
 
-stage210_setup_ssh() {
+setup_bootloader_config() {
+    if [ "$installation_type" != 'disk' ]; then
+        log green 'Skipping bootloader configuration due to directory installation'
+        return
+    fi
+    case "$bootloader" in
+    'petitboot')
+        local disk_device_name=$(echo "$disk_device" | rev | cut -d'/' -f1 | rev)
+
+        local root_index=0
+        local boot_index=0
+
+        # Find root and boot partition indexes
+        scan_partition_config() {
+            local disk_device="$1"
+            local partition_data="$2"
+            local partition_data_fragments=(${partition_data//:/ })
+            local partition_data_index=${partition_data_fragments[0]}
+            local partition_data_mount_point=${partition_data_fragments[3]}
+            if [ "$partition_data_mount_point" = '/' ]; then
+                root_index=$partition_data_index
+            fi
+            if [ "$partition_data_mount_point" = '/boot' ]; then
+                boot_index=$partition_data_index
+            fi
+        }
+        for part_config in "${disk_partitions[@]}"; do
+            scan_partition_config "$disk_device" "$part_config"
+        done
+        if [ $boot_index -eq 0 ]; then
+            boot_index=$root_index
+        fi
+
+        local kboot_entry1="Gentoo='${disk_device_name}${boot_index}:/vmlinux-$kernel_version initrd=${disk_device_name}${boot_index}:/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
+        echo "$kboot_entry1" | try tee "$path_chroot/boot/kboot.conf" >/dev/null
+        ;;
+    'grub')
+        chroot_call 'grub-install'
+        chroot_call 'grub-mkconfig -o /boot/grub/grub.cfg'
+        ;;
+    'grub-efi')
+        chroot_call 'grub-install --efi-directory=/boot'
+        chroot_call 'grub-mkconfig -o /boot/grub/grub.cfg'
+        ;;
+    *) ;;
+    esac
+}
+
+setup_ssh() {
     local sshd_path="$path_chroot/etc/ssh/sshd_config"
     if [ $ssh_allow_root = true ]; then
         try sed -i 's/^#PermitRootLogin .*/PermitRootLogin yes/' "$sshd_path"
@@ -485,81 +657,170 @@ stage210_setup_ssh() {
     fi
 }
 
-stage211_setup_network() {
+setup_network() {
     local path_initd="$path_chroot/etc/init.d"
-    ln -s 'net.lo' "$path_initd/net.eth0"
-}
-
-# ###############################################################################################
-# Actions inside chroot =========================================================================
-# ###############################################################################################
-
-stage300_env_update() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'env-update && source /etc/profile'
-}
-
-stage301_set_password() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c "usermod --password '$root_password' root"
-}
-
-stage302_generate_locales() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'locale-gen'
-    try quiet chroot "$path_chroot" '/bin/bash' -c "eselect locale set $locale"
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'env-update && source /etc/profile'
-}
-
-stage303_fetch_portage_repository() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'emerge-webrsync && emerge --sync'
-}
-
-stage304_select_profile() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c "eselect profile set $profile"
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'env-update && source /etc/profile'
-}
-
-stage305_update_system() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c "emerge --newuse --deep --update @system @world $quiet_flag"
-}
-
-stage306_install_tools() {
-    for package in "${guest_tools[@]}"; do
-        try quiet chroot "$path_chroot" '/bin/bash' -c "emerge $package $quiet_flag"
+    for link in "${network_links[@]}"; do
+        ln -s 'net.lo' "$path_initd/net.$link"
     done
 }
 
-stage307_revdep_rebuild() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c "revdep-rebuild $quiet_flag"
+# Actions inside chroot =========================================================================
+
+setup_main_repo() {
+    # Silences warnings before emerge-webrsync was run.
+    chroot_call 'mkdir -p /var/db/repos/gentoo'
 }
 
-stage308_setup_rc_autostart() {
+update_environment() {
+    chroot_call 'env-update && source /etc/profile'
+}
+
+setup_root_password() {
+    chroot_call "usermod --password '$root_password' root"
+}
+
+setup_locales() {
+    # Add locales.
+    local path_make_conf="$path_chroot/etc/locale.gen"
+    for ((i = 0; i < "${#locales[@]}"; i++)); do
+        echo "${locales[$i]}" | try tee -a "$path_make_conf" >/dev/null
+    done
+    # Generate locales and select default.
+    chroot_call 'locale-gen'
+    chroot_call "eselect locale set $locale"
+    chroot_call 'env-update && source /etc/profile'
+}
+
+setup_portage_repository() {
+    chroot_call "emerge-webrsync $quiet_flag"
+    if [ $portage_latest_sync = true ]; then
+        chroot_call "emerge --sync $quiet_flag"
+    fi
+}
+
+setup_profile() {
+    chroot_call "eselect profile set $profile"
+    chroot_call 'env-update && source /etc/profile'
+}
+
+setup_cpu_flags() {
+    if [ $use_cpuid2cpuflags = false ]; then
+        return
+    fi
+    chroot_call "FEATURES=\"-distcc\" emerge --update --newuse cpuid2cpuflags $quiet_flag"
+    chroot_call 'echo "*/* $(cpuid2cpuflags)" > /etc/portage/package.use/00cpu-flags'
+}
+
+update_distcc_host() {
+    if [ -z "$distcc_hosts" ]; then
+        return
+    fi
+    log cyan "Reading distcc system configuration"
+    BINUTILS_VER=$(qatom -F '%{PV}' $(qfile -v $(realpath /usr/bin/ld) | cut -d' ' -f1))
+    GCC_VER=$(qatom -F '%{PV}' $(qfile -v $(realpath /usr/bin/gcc) | cut -d' ' -f1))
+    KERNEL_VER=$(qatom -F '%{PV}' $(qlist -Ive sys-kernel/linux-headers))
+    LIBC_VER=$(qatom -F '%{PV}' $(qlist -Ive sys-libs/glibc))
+    if [ ! -z "$abi" ]; then
+        distcc_host_setup_command="crossdev --b '~${BINUTILS_VER}' --g '~${GCC_VER}' --k '~${KERNEL_VER}' --l '~${LIBC_VER}' -t $(portageq envvar CHOST) --abis $abi"
+    else
+        distcc_host_setup_command="crossdev --b '~${BINUTILS_VER}' --g '~${GCC_VER}' --k '~${KERNEL_VER}' --l '~${LIBC_VER}' -t $(portageq envvar CHOST)"
+    fi
+    # If configuration didn't change, we can skip this.
+    if [ ! -z "$distcc_host_setup_command_stored" ] && [ "$distcc_host_setup_command_stored" = "$distcc_host_setup_command" ]; then
+        return
+    fi
+    distcc_host_setup_command_stored="$distcc_host_setup_command"
+    if [ $verbose = true ]; then
+        ssh_quiet=''
+    else
+        ssh_quiet="-o LogLevel=quiet"
+    fi
+    for distcc_host in ${distcc_hosts[@]}; do
+        if [ "$distcc_host" != 'localhost' ]; then
+            if [ -z "$ssh_distcc_host_password" ]; then
+                chroot_call "ssh $ssh_quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o TCPKeepAlive=yes -o ServerAliveInterval=$ssh_distcc_host_timeout -o ConnectTimeout=$ssh_distcc_host_timeout $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
+            else
+                chroot_call "echo $ssh_distcc_host_password | ssh $ssh_quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o TCPKeepAlive=yes -o ServerAliveInterval=$ssh_distcc_host_timeout -o ConnectTimeout=$ssh_distcc_host_timeout $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
+            fi
+        fi
+    done
+}
+
+install_updates() {
+    if [ $update_system = true ]; then
+        chroot_call "emerge --newuse --deep --update @system @world $quiet_flag"
+        update_distcc_host
+    fi
+}
+
+install_base_tools() {
+    for package in "${guest_base_tools[@]}"; do
+        chroot_call "FEATURES=\"-distcc\" emerge --update --newuse $package $quiet_flag"
+    done
+}
+
+install_other_tools() {
+    for package in "${guest_tools[@]}"; do
+        chroot_call "emerge --update --newuse $package $quiet_flag"
+    done
+}
+
+revdep_rebuild() {
+    chroot_call "revdep-rebuild $quiet_flag"
+}
+
+setup_autostart() {
     for key in "${!guest_rc_startup[@]}"; do
         for tool in ${guest_rc_startup[$key]}; do
-            try quiet chroot "$path_chroot" '/bin/bash' -c "rc-update add $tool $key"
+            chroot_call "rc-update add $tool $key"
         done
     done
 }
 
-# ###############################################################################################
-# Cleaning ======================================================================================
-# ###############################################################################################
-
-stage900_cleanup_news() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'eselect news read all'
+setup_scripts() {
+    for script in "${scripts[@]}"; do
+        local url_script="$url_repo/scripts/$script"
+        local path_script="$path_tmp/scripts/$script"
+        try wget "$url_script" -O "$path_script" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
+        try source "$path_script"
+    done
 }
 
-stage901_cleanup_portage() {
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'emerge --depclean'
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'eclean --deep distfiles'
-    try quiet chroot "$path_chroot" '/bin/bash' -c 'eclean --deep packages'
+# Cleaning ======================================================================================
+
+reset_distcc() {
+    if [ ! $distcc_oneshot = true ]; then
+        return
+    fi
+    chroot_call 'distcc-config --set-hosts "localhost"'
+}
+
+cleanup() {
+    # News
+    chroot_call 'eselect news read all'
+    # Portage
+    chroot_call "emerge --depclean $quiet_flag"
+    chroot_call "eclean --deep $quiet_flag distfiles"
+    chroot_call "eclean --deep $quiet_flag packages"
     try rm -rf "$path_chroot/var/cache/distfiles"/*
 }
 
-stage902_unmount_devices() {
-    umount -l "$path_chroot/dev"{"/shm","/pts"}
-    # TODO: Umount other devices, like proc, run, etc
+unprepare_chroot() {
+    # Unmount devices
+    try umount -l "$path_chroot/dev"{"/shm","/pts"}
+    try umount -R "$path_chroot/proc"
+    try umount -R "$path_chroot/run"
+    try umount -R "$path_chroot/dev"
+    try umount -R "$path_chroot/sys"
+    # DNS information
+    try rm "$path_chroot/etc/resolv.conf"
 }
 
-stage903_unmount_partitions() {
+disk_unmount_partitions() {
+    # TODO: For manual installation, umount /proc, /run, /dev, etc.
+    if [ "$installation_type" != 'disk' ]; then
+        return
+    fi
     unmount_filesystem_from_config() {
         local disk_device="$1"
         local partition_data="$2"
@@ -568,81 +829,38 @@ stage903_unmount_partitions() {
         local partition_data_filesystem=${partition_data_fragments[2]}
         local partition_data_mount_point=${partition_data_fragments[3]}
         local partition_device=${disk_device}${partition_data_index}
-        if [ "$partition_data_filesystem" = 'swap' ]; then
-            echo swapoff $partition_device
-            try quiet swapoff $partition_device
+        if [ "$partition_data_filesystem" = 'swap' ] && [ $use_target_swap = true ]; then
+            try swapoff $partition_device
         fi
-#        if [ "$partition_data_mount_point" != 'none' ]; then
-#            echo umount $partition_device
-#        fi
+        # Normal partitions are unmountd below
     }
-    umount -R $path_chroot
+    try umount -R $path_chroot
 
     # Reverse order of mounting
-    for ((i=${#_disk_partitions_sorted_by_mount_order[@]} - 1; i >= 0 ; i--)); do
+    for ((i = ${#_disk_partitions_sorted_by_mount_order[@]} - 1; i >= 0; i--)); do
         local part_config="${disk_partitions_sorted_by_mount_order[$i]}"
         unmount_filesystem_from_config $disk_device $part_config
     done
 }
 
-# ###############################################################################################
-# MAIN PROGRAM ==================================================================================
-# ###############################################################################################
+cleanup_directories() {
+    # TODO: Verify if tmp directory is empty before deleting
+    try rm -rf "$path_tmp"
+    if [ "$installation_type" = 'disk' ]; then
+        try rm -rf "$path_chroot"
+    fi
+}
 
-stage000_read_variables "$@"
-stage000_validate_input_data
-stage001_validate_disk
+summary() {
+    log magenta "Installation completed"
+    if [ "$installation_type" == 'directory' ]; then
+        log yellow "Remeber to configure fstab and bootloader"
+    fi
+}
 
-welcome
-
-stage000_download_config
-## Setup disk -----------------------------------------------------------------------------------
-stage000_sort_partitions_by_mount_order
-stage002_clean_signatures
-stage003_create_partitions
-stage004_create_filesystems
-stage005_mount_partitions
-
-## Download and extract stage3 ------------------------------------------------------------------
-stage100_get_stage3_url
-stage101_download_stage3
-stage102_extract_stage3
-
-## Setup PS3 Gentoo Linux -----------------------------------------------------------------------
-stage200_mount_devices
-stage201_copy_resolv_conf
-stage202_setup_make_conf
-stage203_setup_packages_use
-stage204_setup_package_accept_keywords
-stage205_setup_locale
-stage206_setup_fstab
-stage207_setup_hostname
-stage208_install_kernel
-stage209_setup_kboot_entry
-stage210_setup_ssh
-stage211_setup_network
-
-## Setup PS3 Gentoo internal chroot environment -------------------------------------------------
-stage300_env_update
-stage301_set_password
-stage302_generate_locales
-stage303_fetch_portage_repository
-stage304_select_profile
-stage305_update_system
-stage306_install_tools
-stage307_revdep_rebuild
-stage308_setup_rc_autostart
-
-## Cleanup and exit -----------------------------------------------------------------------------
-stage900_cleanup_news
-stage901_cleanup_portage
-stage902_unmount_devices
-stage903_unmount_partitions
-
-## Summary --------------------------------------------------------------------------------------
-summary
-
-# ###############################################################################################
-
-# TODO: Delete resolv.conf in cleanup
-# TODO: Distcc configuration
+# TODO: Wireless networking configuration
+# TODO: Custom repos usage
+# TODO: Users add scripts
+# TODO: Allow using local stage3 and portage tar files
+# TODO: Move platform specific functions to scripts. For example bootloader configurators
+# TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, portage_latest_sync, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.
