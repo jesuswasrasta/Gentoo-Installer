@@ -14,8 +14,8 @@ export kernel_version="6.5.4"
 export kernel_headers_version="6.5-r1"
 export bootloader='petitboot' # [petitboot/grub/grub-efi]
 export use_cpuid2cpuflags=true # Install cpuid2cpuflags and use to fill 00cpu-flags file.
-export portage_latest_sync=false # Run emerge --sync after emerge-webrsync to get the newest tarball.
-export update_system=false # Run emerge --update --newuse --deep @world during installation.
+export portage_latest_sync=true # Run emerge --sync after emerge-webrsync to get the newest tarball.
+export update_system=true # Run emerge --update --newuse --deep @world during installation.
 export use_target_swap=true # Should the installer script use swap space on the target drive.
 
 export -a network_links=(
@@ -28,7 +28,7 @@ export disk_scheme='dos' # [gpt/dos]. Older petitboot (on FAT) works only with d
 
 export -a disk_partitions=( 
     # index:mount_order:file_system:mount_point:size:options:dump:pass.
-    1:1:ext3:/boot:+256MiB:defaults,noatime:1:2 # BOOT
+    1:1:ext4:/boot:+256MiB:defaults,noatime:1:2 # BOOT
     2:0:btrfs:/:-4100MiB:defaults,noauto:0:1 # ROOT
     3:2:swap:none:+4GiB:sw:0:0 # SWAP
 )
@@ -46,7 +46,7 @@ export -a locales=(
 
 export -A make_conf=(
     [COMMON_FLAGS]='-O2 -pipe -mcpu=cell -mtune=cell -mabi=altivec -maltivec -mno-string -mno-update -mno-multiple'
-    [USE]='ps3 zeroconf mdnsresponder-compat'
+    [USE]='ps3 zeroconf'
     [MAKEOPTS]='-j6 -l2'
     [ACCEPT_LICENSE]='*'
     [FEATURES]="distcc"

@@ -47,7 +47,7 @@ export -a locales=(
 
 export -A make_conf=(
     [COMMON_FLAGS]='-O2 -pipe'
-    [USE]='zeroconf mdnsresponder-compat'
+    [USE]='zeroconf'
     [MAKEOPTS]='-j7'
     [ACCEPT_LICENSE]='*' # Automatically accept all licenses.
     [GRUB_PLATFORMS]='efi-64'
@@ -76,6 +76,8 @@ export -a guest_tools=(
     net-dns/avahi
     sys-devel/distcc
     sys-devel/crossdev
+    dev-vcs/git
+    dev-vcs/subversion
 )
 
 export -A guest_rc_startup=(
