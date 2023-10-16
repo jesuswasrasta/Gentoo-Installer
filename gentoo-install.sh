@@ -176,7 +176,7 @@ chroot_call() {
 run_extra_scripts() {
     # Extra scripts are stored in target configuration, and run after finishing or skipping given functions.
     local post_function_name="$1"
-    if [ -z "${extra_scripts}" ]; then
+    if [ -z "${extra_scripts[$post_function_name]}" ]; then
         return
     fi
     for script in ${extra_scripts[$post_function_name]}; do
