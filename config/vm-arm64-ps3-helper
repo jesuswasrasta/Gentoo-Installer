@@ -25,8 +25,8 @@ export use_cpuid2cpuflags=true # If flags are known, can be directly inserted us
 ## Bootloaders ----------------------------------------------------------------------------------
 
 export bootloader='grub-efi' # [petitboot/grub/grub-efi]
-export portage_latest_sync=false # Run emerge --sync after emerge-webrsync to get the newest tarball.
-export update_system=false # Run emerge --update --newuse --deep @world during installation.
+export sync_portage=true # Run emerge --sync after emerge-webrsync to get the newest tarball.
+export update_system=true # Run emerge --update --newuse --deep @world during installation.
 
 ## Partitions -----------------------------------------------------------------------------------
 
@@ -84,12 +84,11 @@ export -A guest_rc_startup=(
   [default]='sysklogd sshd avahi-daemon distccd'
 )
 
-# Run extra configuration scripts after installation.
-export -a scripts=(
-    setup-crossdev-host.sh
-    setup-distccd-host.sh
-)
-
 export -a distccd_host_allow=(
     '192.168.0.0/16'
+)
+
+# Additional platform-specific scripts, incjected after given primary function finishes successfully.
+export -A extra_scripts=(
+    [setup_autostart]='setup_crossdev_host setup_distccd_host'
 )

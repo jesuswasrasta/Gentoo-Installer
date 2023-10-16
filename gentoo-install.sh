@@ -2,7 +2,6 @@
 
 # HELPER VARIABLES ==============================================================================
 
-title='GENTOO LINUX INSTALLER'
 dir="$(pwd)" # Current directory where script was called from.
 branch="main"
 url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
@@ -22,10 +21,9 @@ read_variables "$@"    # Read user input variables - device, configuration, verb
 validate_input_data    # Validate if input data is correct.
 warn_about_disk_wiping # Asks user to confirm disk formatting is applying.
 
-log magneta "$title started"
-
 prepare_directories            # Create path_tmp and path_chroot.
 get_config                     # Download configuration or load local configuration file.
+override_config                # Override default values from config, using flags.
 validate_config                # Checks if all settings in configuration are set correctly.
 sort_partitions_by_mount_order # Prepare array of devices sorted by mounting order.
 
@@ -57,20 +55,16 @@ setup_ssh           # Configure SSH access.
 setup_main_repo     # Creates empty directory, removes warning before syncing portage.
 
 ## Setup PS3 Gentoo internal chroot environment -------------------------------------------------
-update_environment          # Refreshing env variables.
-setup_locales               # Generate locales and select default one.
-setup_portage_repository    # Downloads latest portage tree.
-setup_profile               # Changes profile to selected.
-setup_cpu_flags             # Downloads and uses cpuid2cpuflags to generate flags for current CPU.
-install_base_tools          # Installs tools needed at early stage.
-setup_distcc_client         # Downloads and configures distcc if used.
-install_kernel              # Installs selected type of kernel.
-install_updates             # Updates and rebuilds @world and @system including new use flags.
-install_other_tools         # Installs other selected tools.
-install_custom_init_scripts # Downloads and installs custom init scripts. # TODO: Replace with custom portage repository.
-setup_autostart             # Adds init scripts to selected runlevels.
-setup_bootloader_config     # Configures kboot and/or grub.
-setup_scripts               # Runs extra scripts, definied in config scripts array.
+update_environment       # Refreshing env variables.
+setup_locales            # Generate locales and select default one.
+setup_portage_repository # Downloads latest portage tree.
+setup_profile            # Changes profile to selected.
+setup_cpu_flags          # Downloads and uses cpuid2cpuflags to generate flags for current CPU.
+install_base_tools       # Installs tools needed at early stage, before distcc is available.
+setup_distcc_client      # Downloads and configures distcc if used.
+install_updates          # Updates and rebuilds @world and @system including new use flags.
+install_other_tools      # Installs other selected tools.
+setup_autostart          # Adds init scripts to selected runlevels.
 
 ## Cleanup and exit -----------------------------------------------------------------------------
 revdep_rebuild          # Fixes broken dependencies.
@@ -82,7 +76,7 @@ cleanup_directories     # Removes temporart installation files.
 summary                 # Show summary information if applicable.
 
 ## Summary --------------------------------------------------------------------------------------
-log green "$title done"
+log green "Installation done"
 
 exit
 
@@ -159,6 +153,11 @@ print_usage() {
     echo ""
     echo "  --verbose                         Enable verbose output."
     echo ""
+    echo "  --sync-portage true/false         Should perform emerge-sync during installation. If empty, uses value from config."
+    echo "  --update-system true/false        Should update @world during installation. If empty, uses value from config."
+    echo "  --use-cpuid2cpuflags true/false   Install and use cpuid2cpuflags to setup /etc/portage/package.use/00cpu-flags. If empty, uses value from config."
+    echo "  --use-target-swap true/false      Should installer use target device swap if available. If empty, uses value from config."
+    echo ""
     echo "  --distcc <host>                   Specify a distcc host."
     echo "  --distcc-user <host_username>     Specify the username for distcc host."
     echo "  --distcc-password <host_password> Specify the password for distcc host."
@@ -173,6 +172,20 @@ chroot_call() {
 }
 
 ## Disk preparation -----------------------------------------------------------------------------
+
+run_extra_scripts() {
+    # Extra scripts are stored in target configuration, and run after finishing or skipping given functions.
+    local post_function_name="$1"
+    if [ -z "${extra_scripts}" ]; then
+        return
+    fi
+    for script in ${extra_scripts[$post_function_name]}; do
+        local url_script="$url_repo/scripts/$script.sh"
+        local path_script="$path_tmp/scripts/$script.sh"
+        try wget "$url_script" -O "$path_script" --no-cache --no-cookies $quiet_flag
+        try source "$path_script"
+    done
+}
 
 read_variables() {
     while [ $# -gt 0 ]; do
@@ -236,12 +249,52 @@ read_variables() {
                 url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
             fi
             ;;
+        --sync-portage)
+            shift
+            if [ $# -gt 0 ]; then
+                fsync_portage=$1
+            fi
+            ;;
+        --update-system)
+            shift
+            if [ $# -gt 0 ]; then
+                fupdate_system=$1
+            fi
+            ;;
+        --use-cpuid2cpuflags)
+            shift
+            if [ $# -gt 0 ]; then
+                fuse_cpuid2cpuflags=$1
+            fi
+            ;;
+        --use-target-swap)
+            shift
+            if [ $# -gt 0 ]; then
+                fuse_target_swap=$1
+            fi
+            ;;
         *)
             error "Unknown option: $1"
             ;;
         esac
         shift
     done
+    run_extra_scripts ${FUNCNAME[0]}
+}
+
+override_config() {
+    if [ ! -z $fsync_portage ]; then
+        sync_portage=$fsync_portage
+    fi
+    if [ ! -z $fupdate_system ]; then
+        update_system=$fupdate_system
+    fi
+    if [ ! -z $fuse_cpuid2cpuflags ]; then
+        use_cpuid2cpuflags=$fuse_cpuid2cpuflags
+    fi
+    if [ ! -z $fuse_target_swap ]; then
+        use_target_swap=$fuse_target_swap
+    fi
 }
 
 validate_input_data() {
@@ -266,6 +319,7 @@ validate_input_data() {
     if [ "$installation_type" = 'device' ] && [ lsblk -no MOUNTPOINT "$disk_device" | grep -q -v "^$" ]; then
         error "Device $disk_device is currently in use. Unmount it before usage."
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 warn_about_disk_wiping() {
@@ -287,6 +341,7 @@ warn_about_disk_wiping() {
             esac
         done
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 prepare_directories() {
@@ -299,6 +354,7 @@ prepare_directories() {
     if [ ! -d "$path_chroot" ]; then
         try mkdir -p "$path_chroot"
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 get_config() {
@@ -311,6 +367,7 @@ get_config() {
         try cp "$custom_config" "$path_config"
     fi
     try source "$path_config"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 validate_config() {
@@ -321,10 +378,12 @@ validate_config() {
             error "To use distcc host, configuration must include [FEATURES]='distcc' in make_conf."
         fi
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 sort_partitions_by_mount_order() {
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     IFS=$'\n' read -r -d '' -a disk_partitions_sorted_by_mount_order < <(
@@ -332,11 +391,13 @@ sort_partitions_by_mount_order() {
             echo "$partition"
         done | tr ':' $'\t' | sort -k2,2n | tr $'\t' ':'
     )
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 disk_clean_signatures() {
     # Cleans signatures from partition table and every partition.
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     for partition in "$disk_device"*; do
@@ -347,11 +408,13 @@ disk_clean_signatures() {
     try wipefs -fa "$disk_device"
     try sleep 1 # Without sleep blockdev below sometimes fails
     try blockdev --rereadpt -v "$disk_device"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 disk_create_partitions() {
     # Create partitions on device.
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     local fdisk_command=''
@@ -384,11 +447,13 @@ disk_create_partitions() {
     # Write new partition scheme
     fdisk_command="${fdisk_command}w\n"
     printf "$fdisk_command" | try fdisk "$disk_device" --wipe auto
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 disk_create_filesystems() {
     # Creating filesystem for given configuration.
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     create_filesystem_from_config() {
@@ -410,10 +475,12 @@ disk_create_filesystems() {
     for part_config in "${disk_partitions[@]}"; do
         create_filesystem_from_config "$disk_device" "$part_config"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 disk_mount_partitions() {
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     mount_filesystem_from_config() {
@@ -438,6 +505,7 @@ disk_mount_partitions() {
     for part_config in "${disk_partitions_sorted_by_mount_order[@]}"; do
         mount_filesystem_from_config "$disk_device" "$part_config"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 # Downloading files =============================================================================
@@ -455,6 +523,7 @@ stage3_download() {
     fi
     # Download stage3 file
     try wget "$url_gentoo_stage3" -O "$path_stage3" $quiet_flag
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 stage3_extract() {
@@ -462,6 +531,7 @@ stage3_extract() {
     try cd "$path_chroot"
     try tar -xvpf "$path_stage3" --xattrs-include="*/*" --numeric-owner
     try cd "$dir"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 # Configuring system ============================================================================
@@ -479,6 +549,7 @@ prepare_chroot() {
     try cd "$dir"
     # Copy DNS information.
     try cp --dereference '/etc/resolv.conf' "$path_chroot/etc/resolv.conf"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_make_conf() {
@@ -495,12 +566,13 @@ setup_make_conf() {
     for key in "${!make_conf[@]}"; do
         insert_config "$key" "${make_conf[$key]}"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_packages_config() {
     # USE
     local path_package_use="$path_chroot/etc/portage/package.use"
-    for key in "${!_package_use[@]}"; do
+    for key in "${!package_use[@]}"; do
         echo "${package_use[$key]}" | try tee -a "$path_package_use/$key" >/dev/null
     done
     # Accept keywords
@@ -508,11 +580,13 @@ setup_packages_config() {
     for key in "${!package_accept_keywords[@]}"; do
         echo "${package_accept_keywords[$key]}" | try tee -a "$path_package_accept_keywords/$key" >/dev/null
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_fstab() {
     if [ "$installation_type" != 'disk' ]; then
         log green 'Skipping fstab configuration due to directory installation'
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     local path_fstab="$path_chroot/etc/fstab"
@@ -534,15 +608,18 @@ setup_fstab() {
     for part_config in "${disk_partitions_sorted_by_mount_order[@]}"; do
         add_partition_entry "$disk_device" "$part_config"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_hostname() {
     local path_hostname="$path_chroot/etc/hostname"
     echo "$hostname" | try tee "$path_hostname" >/dev/null
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_distcc_client() {
     if [ -z "$distcc_hosts" ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     # USE='-zeroconf' is used to speed up installation the first time. Otherwise it will emerge avahi and all dependencies.
@@ -550,101 +627,7 @@ setup_distcc_client() {
     chroot_call "FEATURES=\"-distcc\" USE='-zeroconf' emerge --update --newuse distcc $quiet_flag"
     chroot_call "distcc-config --set-hosts '$distcc_hosts'"
     update_distcc_host
-}
-
-install_kernel() {
-    # TODO: Install with custom repository.
-    if [ ! -n "$kernel_version" ]; then
-        return
-    fi
-    local linux_filename="linux-$kernel_version.tar.xz"
-    local url_linux_download="https://github.com/damiandudycz/ps3/raw/main/$linux_filename"
-    local path_linux_download="$path_tmp/$linux_filename"
-    local path_linux_extract="$path_tmp/linux-$kernel_version"
-
-    local path_chroot_boot="$path_chroot/boot"
-    local path_kernel_vmlinux="$path_linux_extract/vmlinux"
-    local path_kernel_initramfs="$path_linux_extract/initramfs.img"
-    local path_kernel_modules="$path_linux_extract/modules/$kernel_version-gentoo-ppc64"
-    local path_chroot_modules="$path_chroot/lib/modules/$kernel_version-gentoo-ppc64"
-
-    if [ ! -d "$path_tmp" ]; then
-        try mkdir -p "$path_tmp"
-    fi
-    if [ ! -d "$path_linux_extract" ]; then
-        try mkdir -p "$path_linux_extract"
-    fi
-
-    try wget "$url_linux_download" -O "$path_linux_download" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
-    try tar -xvpf "$path_linux_download" --directory "$path_linux_extract"
-
-    if [ ! -d "$path_chroot_modules" ]; then
-        try mkdir -p "$path_chroot_modules"
-    fi
-
-    try cp "$path_kernel_vmlinux" "$path_chroot_boot/vmlinux-$kernel_version"
-    try cp "$path_kernel_initramfs" "$path_chroot_boot/initramfs-$kernel_version.img"
-    try cp -r "$path_kernel_modules"/* "$path_chroot_modules"
-
-    update_distcc_host
-}
-
-install_custom_init_scripts() {
-    for script in "${guest_init_scripts[@]}"; do
-        # Download and install init script
-        local url_script="$url_repo/init.d/$script"
-        local path_script="$path_chroot/etc/init.d/$script"
-        try wget "$url_script" -O "$path_script" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
-        try chmod +x "$path_script"
-    done
-}
-
-setup_bootloader_config() {
-    if [ "$installation_type" != 'disk' ]; then
-        log green 'Skipping bootloader configuration due to directory installation'
-        return
-    fi
-    case "$bootloader" in
-    'petitboot')
-        local disk_device_name=$(echo "$disk_device" | rev | cut -d'/' -f1 | rev)
-
-        local root_index=0
-        local boot_index=0
-
-        # Find root and boot partition indexes
-        scan_partition_config() {
-            local disk_device="$1"
-            local partition_data="$2"
-            local partition_data_fragments=(${partition_data//:/ })
-            local partition_data_index=${partition_data_fragments[0]}
-            local partition_data_mount_point=${partition_data_fragments[3]}
-            if [ "$partition_data_mount_point" = '/' ]; then
-                root_index=$partition_data_index
-            fi
-            if [ "$partition_data_mount_point" = '/boot' ]; then
-                boot_index=$partition_data_index
-            fi
-        }
-        for part_config in "${disk_partitions[@]}"; do
-            scan_partition_config "$disk_device" "$part_config"
-        done
-        if [ $boot_index -eq 0 ]; then
-            boot_index=$root_index
-        fi
-
-        local kboot_entry1="Gentoo='${disk_device_name}${boot_index}:/vmlinux-$kernel_version initrd=${disk_device_name}${boot_index}:/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
-        echo "$kboot_entry1" | try tee "$path_chroot/boot/kboot.conf" >/dev/null
-        ;;
-    'grub')
-        chroot_call 'grub-install'
-        chroot_call 'grub-mkconfig -o /boot/grub/grub.cfg'
-        ;;
-    'grub-efi')
-        chroot_call 'grub-install --efi-directory=/boot'
-        chroot_call 'grub-mkconfig -o /boot/grub/grub.cfg'
-        ;;
-    *) ;;
-    esac
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_ssh() {
@@ -655,6 +638,7 @@ setup_ssh() {
     if [ $ssh_allow_passwordless = true ]; then
         try sed -i 's/^#PermitEmptyPasswords .*/PermitEmptyPasswords yes/' "$sshd_path"
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_network() {
@@ -662,6 +646,7 @@ setup_network() {
     for link in "${network_links[@]}"; do
         ln -s 'net.lo' "$path_initd/net.$link"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 # Actions inside chroot =========================================================================
@@ -669,14 +654,17 @@ setup_network() {
 setup_main_repo() {
     # Silences warnings before emerge-webrsync was run.
     chroot_call 'mkdir -p /var/db/repos/gentoo'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 update_environment() {
     chroot_call 'env-update && source /etc/profile'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_root_password() {
     chroot_call "usermod --password '$root_password' root"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_locales() {
@@ -689,30 +677,36 @@ setup_locales() {
     chroot_call 'locale-gen'
     chroot_call "eselect locale set $locale"
     chroot_call 'env-update && source /etc/profile'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_portage_repository() {
     chroot_call "emerge-webrsync $quiet_flag"
-    if [ $portage_latest_sync = true ]; then
+    if [ $sync_portage = true ]; then
         chroot_call "emerge --sync $quiet_flag"
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_profile() {
     chroot_call "eselect profile set $profile"
     chroot_call 'env-update && source /etc/profile'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_cpu_flags() {
     if [ $use_cpuid2cpuflags = false ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     chroot_call "FEATURES=\"-distcc\" emerge --update --newuse cpuid2cpuflags $quiet_flag"
     chroot_call 'echo "*/* $(cpuid2cpuflags)" > /etc/portage/package.use/00cpu-flags'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 update_distcc_host() {
     if [ -z "$distcc_hosts" ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     log cyan "Reading distcc system configuration"
@@ -727,10 +721,11 @@ update_distcc_host() {
     fi
     # If configuration didn't change, we can skip this.
     if [ ! -z "$distcc_host_setup_command_stored" ] && [ "$distcc_host_setup_command_stored" = "$distcc_host_setup_command" ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     distcc_host_setup_command_stored="$distcc_host_setup_command"
-    if [ $verbose = true ]; then
+    if [ -z "$quiet_flag" ]; then
         ssh_quiet=''
     else
         ssh_quiet="-o LogLevel=quiet"
@@ -744,6 +739,7 @@ update_distcc_host() {
             fi
         fi
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 install_updates() {
@@ -751,22 +747,26 @@ install_updates() {
         chroot_call "emerge --newuse --deep --update @system @world $quiet_flag"
         update_distcc_host
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 install_base_tools() {
     for package in "${guest_base_tools[@]}"; do
         chroot_call "FEATURES=\"-distcc\" emerge --update --newuse $package $quiet_flag"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 install_other_tools() {
     for package in "${guest_tools[@]}"; do
         chroot_call "emerge --update --newuse $package $quiet_flag"
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 revdep_rebuild() {
     chroot_call "revdep-rebuild $quiet_flag"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 setup_autostart() {
@@ -775,24 +775,18 @@ setup_autostart() {
             chroot_call "rc-update add $tool $key"
         done
     done
-}
-
-setup_scripts() {
-    for script in "${scripts[@]}"; do
-        local url_script="$url_repo/scripts/$script"
-        local path_script="$path_tmp/scripts/$script"
-        try wget "$url_script" -O "$path_script" --no-http-keep-alive --no-cache --no-cookies $quiet_flag
-        try source "$path_script"
-    done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 # Cleaning ======================================================================================
 
 reset_distcc() {
     if [ ! $distcc_oneshot = true ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     chroot_call 'distcc-config --set-hosts "localhost"'
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 cleanup() {
@@ -803,6 +797,7 @@ cleanup() {
     chroot_call "eclean --deep $quiet_flag distfiles"
     chroot_call "eclean --deep $quiet_flag packages"
     try rm -rf "$path_chroot/var/cache/distfiles"/*
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 unprepare_chroot() {
@@ -814,11 +809,13 @@ unprepare_chroot() {
     try umount -R "$path_chroot/sys"
     # DNS information
     try rm "$path_chroot/etc/resolv.conf"
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 disk_unmount_partitions() {
     # TODO: For manual installation, umount /proc, /run, /dev, etc.
     if [ "$installation_type" != 'disk' ]; then
+        run_extra_scripts ${FUNCNAME[0]}
         return
     fi
     unmount_filesystem_from_config() {
@@ -841,6 +838,7 @@ disk_unmount_partitions() {
         local part_config="${disk_partitions_sorted_by_mount_order[$i]}"
         unmount_filesystem_from_config $disk_device $part_config
     done
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 cleanup_directories() {
@@ -849,6 +847,7 @@ cleanup_directories() {
     if [ "$installation_type" = 'disk' ]; then
         try rm -rf "$path_chroot"
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 summary() {
@@ -856,11 +855,11 @@ summary() {
     if [ "$installation_type" == 'directory' ]; then
         log yellow "Remeber to configure fstab and bootloader"
     fi
+    run_extra_scripts ${FUNCNAME[0]}
 }
 
 # TODO: Wireless networking configuration
 # TODO: Custom repos usage
 # TODO: Users add scripts
-# TODO: Allow using local stage3 and portage tar files
-# TODO: Move platform specific functions to scripts. For example bootloader configurators
-# TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, portage_latest_sync, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.
+# TODO: Allow using local stage3 and portage tar files - tested, didn'm seen time improvement, so sticking to webrsync.
+# TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, sync_portage, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.

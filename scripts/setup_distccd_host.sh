@@ -1,7 +1,5 @@
 #!/bin/bash
 
-cd "$dir"
-
 # Configure host distcc environment.
 
 for allow in "${distccd_host_allow[@]}"; do

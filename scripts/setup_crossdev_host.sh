@@ -1,7 +1,5 @@
 #!/bin/bash
 
-cd "$dir"
-
 # Configure host crossdev environment and add targets.
 
 chroot_call 'mkdir -p /var/db/repos/crossdev/{profiles,metadata}'

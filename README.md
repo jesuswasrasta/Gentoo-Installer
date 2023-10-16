@@ -13,3 +13,7 @@ and after installer finished, add fstab configuration and kboot entry.
 
 If you want to customize configuration, you can download file config/ps3, edit it and use as
 `./gentoo-install.sh --device /dev/ps3dd --custom-config ps3_file_path --verbose`
+
+To use distcc during installation, use --distcc flag:
+`./gentoo-install.sh --device /dev/ps3dd --config ps3 --distcc "192.168.0.50,cpp,lzo"`
+this will format the given harddrive!
