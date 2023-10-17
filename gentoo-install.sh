@@ -861,5 +861,6 @@ summary() {
 # TODO: Wireless networking configuration
 # TODO: Custom repos usage
 # TODO: Users add scripts
-# TODO: Allow using local stage3 and portage tar files - tested, didn'm seen time improvement, so sticking to webrsync.
+# TODO: Allow using local stage3 and portage tar files - tested, didn'm seen time improvement, so sticking to webrsync
 # TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, sync_portage, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.
+# TODO: ADD cpp,lzo to hosts
