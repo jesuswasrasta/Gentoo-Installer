@@ -864,3 +864,4 @@ summary() {
 # TODO: Allow using local stage3 and portage tar files - tested, didn'm seen time improvement, so sticking to webrsync
 # TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, sync_portage, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.
 # TODO: ADD cpp,lzo to hosts
+# TODO: Move kboot.conf to /etc when installing without seperate /boot partition, plus remove device name from it if possible
