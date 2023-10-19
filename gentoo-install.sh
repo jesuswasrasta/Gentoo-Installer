@@ -151,6 +151,9 @@ print_usage() {
     echo "  --config <remote_config>          Use a remote configuration."
     echo "  --custom-config <config_file>     Use a custom configuration file."
     echo ""
+    echo "  --password <password>             Set root user password."
+    echo "  --hostname <hostname>             Set hostname."
+    echo ""
     echo "  --verbose                         Enable verbose output."
     echo ""
     echo "  --sync-portage true/false         Should perform emerge-sync during installation. If empty, uses value from config."
@@ -273,6 +276,18 @@ read_variables() {
                 fuse_target_swap=$1
             fi
             ;;
+        --password)
+            shift
+            if [ $# -gt 0 ]; then
+                froot_password=$1
+            fi
+            ;;
+        --hostname)
+            shift
+            if [ $# -gt 0 ]; then
+                fhostname=$1
+            fi
+            ;;
         *)
             error "Unknown option: $1"
             ;;
@@ -294,6 +309,12 @@ override_config() {
     fi
     if [ ! -z $fuse_target_swap ]; then
         use_target_swap=$fuse_target_swap
+    fi
+    if [ ! -z $froot_password ]; then
+        root_password=$froot_password
+    fi
+    if [ ! -z $fhostname ]; then
+        hostname=$fhostname
     fi
 }
 
@@ -625,7 +646,8 @@ setup_distcc_client() {
     # USE='-zeroconf' is used to speed up installation the first time. Otherwise it will emerge avahi and all dependencies.
     # This will be updated later with default flags.
     chroot_call "FEATURES=\"-distcc\" USE='-zeroconf' emerge --update --newuse distcc $quiet_flag"
-    chroot_call "distcc-config --set-hosts '$distcc_hosts'"
+    local hosts_cpplzo=$(echo "$distcc_hosts" | sed 's/\([^ ]\+\) \(localhost\|[^ ]\+\)/\1,cpp,lzo \2/g')
+    chroot_call "distcc-config --set-hosts '$hosts_cpplzo'"
     update_distcc_host
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -730,6 +752,7 @@ update_distcc_host() {
     else
         ssh_quiet="-o LogLevel=quiet"
     fi
+    chroot_call "echo '' > /etc/portage/binrepos.conf"
     for distcc_host in ${distcc_hosts[@]}; do
         if [ "$distcc_host" != 'localhost' ]; then
             if [ -z "$ssh_distcc_host_password" ]; then
@@ -737,6 +760,13 @@ update_distcc_host() {
             else
                 chroot_call "echo $ssh_distcc_host_password | ssh $ssh_quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o TCPKeepAlive=yes -o ServerAliveInterval=$ssh_distcc_host_timeout -o ConnectTimeout=$ssh_distcc_host_timeout $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
             fi
+            # Insert PORTAGE_BINHOST
+            local location="ssh://$ssh_distcc_host_user@$distcc_host//usr/$arch_long-unknown-linux-gnu/var/cache/binpkgs"
+            chroot_call "echo '[$distcc_host]' >> /etc/portage/binrepos.conf"
+            chroot_call "echo 'location = $location' >> /etc/portage/binrepos.conf"
+            chroot_call "echo '' >> /etc/portage/binrepos.conf"
+            # TODO: Set /usr/<crossdev>/ profile
+            # TODO: Insert /usr/<crossdev>/etc/portage/ files and config
         fi
     done
     run_extra_scripts ${FUNCNAME[0]}
@@ -859,9 +889,13 @@ summary() {
 }
 
 # TODO: Wireless networking configuration
-# TODO: Custom repos usage
+# TODO: Custom repos usage, including binpkg
 # TODO: Users add scripts
-# TODO: Allow using local stage3 and portage tar files - tested, didn'm seen time improvement, so sticking to webrsync
-# TODO: Add optional flag to tell the script if it sould update the system during installation, use_target_swap, sync_portage, use_cpuid2cpuflags, etc. If flag is not set, use default values from configuration.
-# TODO: ADD cpp,lzo to hosts
-# TODO: Move kboot.conf to /etc when installing without seperate /boot partition, plus remove device name from it if possible
+# TODO: Quick install flag - stage4
+# TODO: GIT repository from binpkg's
+
+# TODO: Automatic configuration of helper tools:
+# distcc initial config
+# copying make conf details
+# setting the same profile
+# emerge -e -b @world

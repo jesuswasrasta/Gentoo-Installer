@@ -49,7 +49,7 @@ export -A make_conf=(
     [USE]='ps3 zeroconf'
     [MAKEOPTS]='-j6 -l2'
     [ACCEPT_LICENSE]='*'
-    [FEATURES]='distcc parallel-fetch parallel-install'
+    [FEATURES]='distcc getbinpkg parallel-fetch parallel-install'
     [VIDEO_CARDS]=''
 )
 

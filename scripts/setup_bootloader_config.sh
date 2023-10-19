@@ -2,7 +2,6 @@
 
 if [ "$installation_type" != 'disk' ]; then
     log green 'Skipping bootloader configuration due to directory installation'
-    run_extra_scripts ${FUNCNAME[0]}
     return
 fi
 case "$bootloader" in
@@ -33,8 +32,15 @@ case "$bootloader" in
         boot_index=$root_index
     fi
 
-    local kboot_entry1="Gentoo='${disk_device_name}${boot_index}:/vmlinux-$kernel_version initrd=${disk_device_name}${boot_index}:/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
-    echo "$kboot_entry1" | try tee "$path_chroot/boot/kboot.conf" >/dev/null
+    if [ $boot_index -eq $root_index ]; then
+        # Install to /etc
+        local kboot_entry1="Gentoo='/boot/vmlinux-$kernel_version initrd=/boot/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
+        echo "$kboot_entry1" | try tee "$path_chroot/etc/kboot.conf" >/dev/null
+    else
+        # Install to /boot
+        local kboot_entry1="Gentoo='/vmlinux-$kernel_version initrd=/initramfs-$kernel_version.img root=/dev/${disk_device_name}${root_index} video=ps3fb:mode:133 rhgb'"
+        echo "$kboot_entry1" | try tee "$path_chroot/boot/kboot.conf" >/dev/null
+    fi
     ;;
 'grub')
     chroot_call 'grub-install'
