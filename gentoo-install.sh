@@ -391,11 +391,6 @@ get_config() {
 validate_config() {
     # TODO: Validate more settings.
     # Check if distcc is added to features.
-    if [ ! -z "$distcc_hosts" ]; then
-        if ! [[ -n "${make_conf[FEATURES]}" && "${make_conf[FEATURES]}" == *distcc* ]]; then
-            error "To use distcc host, configuration must include [FEATURES]='distcc' in make_conf."
-        fi
-    fi
     run_extra_scripts ${FUNCNAME[0]}
 }
 
