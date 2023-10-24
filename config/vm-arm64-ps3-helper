@@ -51,12 +51,18 @@ export -A make_conf=(
     [MAKEOPTS]='-j7'
     [ACCEPT_LICENSE]='*' # Automatically accept all licenses.
     [GRUB_PLATFORMS]='efi-64'
+    [FEATURES]='-news'
 )
 
 ## Packages and tools ---------------------------------------------------------------------------
 
 export -A package_use=(
-#    [00cpu-flags]='*/* CPU_FLAGS_ARM: edsp neon thumb vfp vfpv3 vfpv4 vfp-d32 aes sha1 sha2 crc32 v4 v5 v6 v7 v8 thumb2'
+    # [qemu1]="app-emulation/qemu static-user QEMU_SOFTMMU_TARGETS: ppc64"
+    # [qemu2]="app-emulation/qemu QEMU_USER_TARGETS: ppc64"
+    # [qemu3]="dev-libs/glib static-libs"
+    # [qemu4]="sys-libs/zlib static-libs"
+    # [qemu5]="sys-apps/attr static-libs"
+    # [qemu6]="dev-libs/libpcre2 static-libs"
 )
 
 export -A package_accept_keywords=(
@@ -78,6 +84,7 @@ export -a guest_tools=(
     sys-devel/crossdev
     dev-vcs/git
     dev-vcs/subversion
+    # app-emulation/qemu
 )
 
 export -A guest_rc_startup=(
@@ -91,4 +98,5 @@ export -a distccd_host_allow=(
 # Additional platform-specific scripts, incjected after given primary function finishes successfully.
 export -A extra_scripts=(
     [setup_autostart]='setup_crossdev_host setup_distccd_host setup_bootloader_config'
+    # [setup_cpu_flags]='setup_host_qemu_for_ps3'
 )

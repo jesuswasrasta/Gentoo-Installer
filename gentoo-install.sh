@@ -14,7 +14,7 @@ ssh_distcc_host_user='root'       # Username for SSH when updating distcc host c
 
 # MAIN PROGRAM ==================================================================================
 
-## Prepare -------------------------------------------------------------------------------------
+## Prepare --------------------------------------------------------------------------------------
 source <(sed '1,/^# FUNCTIONS #.*$/d' "$0") # Load functions at the bottom of the script.
 
 read_variables "$@"    # Read user input variables - device, configuration, verbose.
@@ -62,13 +62,13 @@ setup_profile            # Changes profile to selected.
 setup_cpu_flags          # Downloads and uses cpuid2cpuflags to generate flags for current CPU.
 install_base_tools       # Installs tools needed at early stage, before distcc is available.
 setup_distcc_client      # Downloads and configures distcc if used.
+setup_distcc_hosts       # Uploads SSH public key to all of the hosts.
 install_updates          # Updates and rebuilds @world and @system including new use flags.
 install_other_tools      # Installs other selected tools.
 setup_autostart          # Adds init scripts to selected runlevels.
 
 ## Cleanup and exit -----------------------------------------------------------------------------
 revdep_rebuild          # Fixes broken dependencies.
-reset_distcc            # Restore distcc to localhost only if this option is selected.
 cleanup                 # Cleans unneded files.
 unprepare_chroot        # Unmounts devices and removed DNS configuration.
 disk_unmount_partitions # Unmounts partitions.
@@ -164,7 +164,6 @@ print_usage() {
     echo "  --distcc <host>                   Specify a distcc host."
     echo "  --distcc-user <host_username>     Specify the username for distcc host."
     echo "  --distcc-password <host_password> Specify the password for distcc host."
-    echo "  --distcc-oneshot                  Restart distcc configuration to localhost only after intallation."
     echo ""
     echo "  --branch <branch_name>            Specify branch of install script, from which to get files. Default: main."
     exit 1
@@ -223,6 +222,7 @@ read_variables() {
         --verbose)
             unset quiet_flag
             unset quiet_flag_short
+            verbose_flag="--verbose"
             ;;
         --distcc)
             shift
@@ -241,9 +241,6 @@ read_variables() {
             if [ $# -gt 0 ]; then
                 ssh_distcc_host_password="$1"
             fi
-            ;;
-        --distcc-oneshot)
-            distcc_oneshot=true
             ;;
         --branch)
             shift
@@ -535,10 +532,10 @@ stage3_download() {
     local path_stage3="$path_tmp/stage3.tar.xz"
     local stageinfo_url="$base_url_autobuilds/latest-stage3.txt"
     local latest_stage3_content="$(wget -q -O - "$stageinfo_url" --no-http-keep-alive --no-cache --no-cookies)"
-    local latest_ppc64_stage3="$(echo "$latest_stage3_content" | grep "$arch-$init_system" | head -n 1 | cut -d' ' -f1)"
+    local latest_stage3="$(echo "$latest_stage3_content" | grep "$arch-$init_system" | head -n 1 | cut -d' ' -f1)"
     local url_gentoo_stage3
-    if [ -n "$latest_ppc64_stage3" ]; then
-        url_gentoo_stage3="$base_url_autobuilds/$latest_ppc64_stage3"
+    if [ -n "$latest_stage3" ]; then
+        url_gentoo_stage3="$base_url_autobuilds/$latest_stage3"
     else
         error "Failed to download Stage3 URL"
     fi
@@ -646,9 +643,52 @@ setup_distcc_client() {
     # USE='-zeroconf' is used to speed up installation the first time. Otherwise it will emerge avahi and all dependencies.
     # This will be updated later with default flags.
     chroot_call "FEATURES=\"-distcc\" USE='-zeroconf' emerge --update --newuse distcc $quiet_flag"
-    local hosts_cpplzo=$(echo "$distcc_hosts" | sed 's/\([^ ]\+\) \(localhost\|[^ ]\+\)/\1,cpp,lzo \2/g')
+    local hosts_cpplzo=$(echo "$distcc_hosts" | sed 's/\([^ ]\+\) \(localhost\|[^ ]\+\)/\1,lzo \2/g')
     chroot_call "distcc-config --set-hosts '$hosts_cpplzo'"
     update_distcc_host
+
+    # Add features for distcc and getbinpkg
+    chroot_call 'echo FEATURES="${FEATURES} distcc getbinpkg" >> /etc/portage/make.conf'
+
+    # Generate SSH key to be inserted in helper hosts.
+    chroot_call 'ssh-keygen -q -t rsa -N "" <<< $"\ny" >/dev/null 2>&1'
+
+    for distcc_host in ${distcc_hosts[@]}; do
+        if [ "$distcc_host" != 'localhost' ]; then
+            # Insert PORTAGE_BINHOST
+            local location="ssh://$ssh_distcc_host_user@$distcc_host/usr/$arch_long-unknown-linux-gnu/var/cache/binpkgs"
+            chroot_call "echo '[$distcc_host]' >> /etc/portage/binrepos.conf"
+            chroot_call "echo 'sync-uri = $location' >> /etc/portage/binrepos.conf"
+            chroot_call "echo '' >> /etc/portage/binrepos.conf"
+        fi
+    done
+    run_extra_scripts ${FUNCNAME[0]}
+}
+
+setup_distcc_hosts() {
+    if [ -z "$distcc_hosts" ]; then
+        run_extra_scripts ${FUNCNAME[0]}
+        return
+    fi
+
+    for distcc_host in ${distcc_hosts[@]}; do
+        if [ "$distcc_host" != 'localhost' ]; then
+            # Upload ssh key, for passwordless communication
+            if [ -z "$quiet_flag" ]; then
+                ssh_quiet=''
+            else
+                ssh_quiet="-o LogLevel=quiet"
+            fi
+            # Add host to known_hosts
+            chroot_call "ssh-keyscan -H $distcc_host >> ~/.ssh/known_hosts"
+            if [ -z "$ssh_distcc_host_password" ]; then
+                chroot_call "ssh-copy-id $ssh_distcc_host_user@$distcc_host"
+            else
+                chroot_call "sshpass -p $ssh_distcc_host_password ssh-copy-id $ssh_distcc_host_user@$distcc_host"
+            fi
+        fi
+    done
+
     run_extra_scripts ${FUNCNAME[0]}
 }
 
@@ -752,20 +792,10 @@ update_distcc_host() {
     else
         ssh_quiet="-o LogLevel=quiet"
     fi
-    chroot_call "echo '' > /etc/portage/binrepos.conf"
     for distcc_host in ${distcc_hosts[@]}; do
         if [ "$distcc_host" != 'localhost' ]; then
-            if [ -z "$ssh_distcc_host_password" ]; then
-                chroot_call "ssh $ssh_quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o TCPKeepAlive=yes -o ServerAliveInterval=$ssh_distcc_host_timeout -o ConnectTimeout=$ssh_distcc_host_timeout $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
-            else
-                chroot_call "echo $ssh_distcc_host_password | ssh $ssh_quiet -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o TCPKeepAlive=yes -o ServerAliveInterval=$ssh_distcc_host_timeout -o ConnectTimeout=$ssh_distcc_host_timeout $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
-            fi
-            # Insert PORTAGE_BINHOST
-            local location="ssh://$ssh_distcc_host_user@$distcc_host//usr/$arch_long-unknown-linux-gnu/var/cache/binpkgs"
-            chroot_call "echo '[$distcc_host]' >> /etc/portage/binrepos.conf"
-            chroot_call "echo 'location = $location' >> /etc/portage/binrepos.conf"
-            chroot_call "echo '' >> /etc/portage/binrepos.conf"
-            # TODO: Set /usr/<crossdev>/ profile
+            chroot_call "ssh $ssh_quiet $ssh_distcc_host_user@$distcc_host $distcc_host_setup_command"
+            # TODO: Set /usr/<crossdev>/ profile to the same as of this machine
             # TODO: Insert /usr/<crossdev>/etc/portage/ files and config
         fi
     done
@@ -809,15 +839,6 @@ setup_autostart() {
 }
 
 # Cleaning ======================================================================================
-
-reset_distcc() {
-    if [ ! $distcc_oneshot = true ]; then
-        run_extra_scripts ${FUNCNAME[0]}
-        return
-    fi
-    chroot_call 'distcc-config --set-hosts "localhost"'
-    run_extra_scripts ${FUNCNAME[0]}
-}
 
 cleanup() {
     # News
@@ -896,6 +917,10 @@ summary() {
 
 # TODO: Automatic configuration of helper tools:
 # distcc initial config
-# copying make conf details
-# setting the same profile
-# emerge -e -b @world
+# copying make conf and other portage details
+# setting the same profile # PORTAGE_CONFIGROOT=/usr/powerpc64-unknown-linux-gnu eselect profile set 1
+# building @system with --keep-going and other flags: https://wiki.gentoo.org/wiki/Cross_build_environment
+# powerpc64-unknown-linux-gnu-emerge -uva --keep-going @system
+# emerge --newuse --update --deep @world
+# Or instead ot last two, use emerge -e @world, but this might not work
+# TODO: Add distcc and getbinpkg on demand depending on configuration.
