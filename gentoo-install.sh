@@ -541,9 +541,7 @@ stage3_download() {
 
 stage3_extract() {
     local path_stage3="$path_tmp/stage3.tar.xz"
-    try cd "$path_chroot"
-    try tar -xvpf "$path_stage3" --xattrs-include="*/*" --numeric-owner
-    try cd "$dir"
+    try tar -xvpf "$path_stage3" --xattrs-include="*/*" --numeric-owner -C "$path_chroot/"
     run_extra_scripts ${FUNCNAME[0]}
 }
 
@@ -551,15 +549,13 @@ stage3_extract() {
 
 prepare_chroot() {
     # Mount required devices.
-    try cd "$path_chroot"
-    try mount --types proc /proc proc
-    try mount --rbind /sys sys
-    try mount --make-rslave sys
-    try mount --rbind /dev dev
-    try mount --make-rslave dev
-    try mount --bind /run run
-    try mount --make-slave run
-    try cd "$dir"
+    try mount --types proc /proc "$path_chroot/proc"
+    try mount --rbind /sys "$path_chroot/sys"
+    try mount --make-rslave "$path_chroot/sys"
+    try mount --rbind /dev "$path_chroot/dev"
+    try mount --make-rslave "$path_chroot/dev"
+    try mount --bind /run "$path_chroot/run"
+    try mount --make-slave "$path_chroot/run"
     # Copy DNS information.
     try cp --dereference '/etc/resolv.conf' "$path_chroot/etc/resolv.conf"
     run_extra_scripts ${FUNCNAME[0]}
