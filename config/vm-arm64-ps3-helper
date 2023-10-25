@@ -84,6 +84,7 @@ export -a guest_tools=(
     sys-devel/crossdev
     dev-vcs/git
     dev-vcs/subversion
+    sys-kernel/genkernel
     # app-emulation/qemu
 )
 

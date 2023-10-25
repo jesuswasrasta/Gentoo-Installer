@@ -49,6 +49,7 @@ export -A make_conf=(
     [MAKEOPTS]='-j6 -l2'
     [ACCEPT_LICENSE]='*'
     [USE]='ps3 zeroconf mdnsresponder-compat -qt5 -qt6 wayland'
+    [USE]='ps3 zeroconf mdnsresponder-compat'
     [VIDEO_CARDS]='fbdev'
     [INPUT_DEVICES]='evdev'
     [FEATURES]='parallel-fetch parallel-install -news'
