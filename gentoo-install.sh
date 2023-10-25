@@ -34,9 +34,9 @@ disk_create_filesystems # Create filesystems definied in the configuration.
 ## Mount partitions -----------------------------------------------------------------------------
 disk_mount_partitions # Mount new partitions to temporary locations in chroot.
 
-## Download and extract stage3 ------------------------------------------------------------------
-stage3_download # Download newest Stage3 tarball.
-stage3_extract  # Extract Stage3 tarball to chroot directory.
+## Download and extract stage3/4 ----------------------------------------------------------------
+gentoo_download # Download newest Stage3 or Stage4 tarball.
+gentoo_extract  # Extract tarball to chroot directory.
 
 ## Prepare for chroot ---------------------------------------------------------------------------
 prepare_chroot # Mount devices required for chroot to work and copies resolve.conf.
@@ -153,6 +153,8 @@ print_usage() {
     echo "  --password <password>             Set root user password."
     echo "  --hostname <hostname>             Set hostname."
     echo ""
+    echo "  --quick-install [NOT IMPLEMENTED] Performs faster method of installation, using stage4 tarball. Some options are not available in this mode."
+    echo ""
     echo "  --verbose                         Enable verbose output."
     echo ""
     echo "  --sync-portage true/false         Should perform emerge-sync during installation. If empty, uses value from config."
@@ -222,6 +224,9 @@ read_variables() {
             unset quiet_flag
             unset quiet_flag_short
             verbose_flag="--verbose"
+            ;;
+        --quick-install)
+            quick_install=true
             ;;
         --distcc)
             shift
@@ -522,24 +527,28 @@ disk_mount_partitions() {
 
 # Downloading files =============================================================================
 
-stage3_download() {
-    local path_stage3="$path_tmp/stage3.tar.xz"
-    local stageinfo_url="$base_url_autobuilds/latest-stage3.txt"
-    local latest_stage3_content="$(wget -q -O - "$stageinfo_url" --no-http-keep-alive --no-cache --no-cookies)"
-    local latest_stage3="$(echo "$latest_stage3_content" | grep "$arch-$init_system" | head -n 1 | cut -d' ' -f1)"
-    local url_gentoo_stage3
-    if [ -n "$latest_stage3" ]; then
-        url_gentoo_stage3="$base_url_autobuilds/$latest_stage3"
+gentoo_download() {
+    local url_gentoo_tarball
+    local path_download="$path_tmp/gentoo.tar.xz"
+    if [ $quick_install = true ]; then
+            url_gentoo_tarball="$url_repo/stage4/$config.tar.xz"
     else
-        error "Failed to download Stage3 URL"
+        local stageinfo_url="$base_url_autobuilds/latest-stage3.txt"
+        local latest_gentoo_content="$(wget -q -O - "$stageinfo_url" --no-http-keep-alive --no-cache --no-cookies)"
+        local latest_stage3="$(echo "$latest_gentoo_content" | grep "$arch-$init_system" | head -n 1 | cut -d' ' -f1)"
+        if [ -n "$latest_stage3" ]; then
+            url_gentoo_tarball="$base_url_autobuilds/$latest_stage3"
+        else
+            error "Failed to download Stage3 URL"
+        fi
     fi
-    # Download stage3 file
-    try wget "$url_gentoo_stage3" -O "$path_stage3" $quiet_flag
+    # Download stage3/4 file
+    try wget "$url_gentoo_tarball" -O "$path_download" $quiet_flag
     run_extra_scripts ${FUNCNAME[0]}
 }
 
-stage3_extract() {
-    local path_stage3="$path_tmp/stage3.tar.xz"
+gentoo_extract() {
+    local path_stage3="$path_tmp/gentoo.tar.xz"
     try tar -xvpf "$path_stage3" --xattrs-include="*/*" --numeric-owner -C "$path_chroot/"
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -581,12 +590,12 @@ setup_packages_config() {
     # USE
     local path_package_use="$path_chroot/etc/portage/package.use"
     for key in "${!package_use[@]}"; do
-        echo "${package_use[$key]}" | try tee -a "$path_package_use/$key" >/dev/null
+        echo "${package_use[$key]}" | try tee "$path_package_use/$key" >/dev/null
     done
     # Accept keywords
     local path_package_accept_keywords="$path_chroot/etc/portage/package.accept_keywords"
     for key in "${!package_accept_keywords[@]}"; do
-        echo "${package_accept_keywords[$key]}" | try tee -a "$path_package_accept_keywords/$key" >/dev/null
+        echo "${package_accept_keywords[$key]}" | try tee "$path_package_accept_keywords/$key" >/dev/null
     done
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -633,8 +642,8 @@ setup_distcc_client() {
     # USE='-zeroconf' is used to speed up installation the first time. Otherwise it will emerge avahi and all dependencies.
     # This will be updated later with default flags.
     chroot_call "FEATURES=\"-distcc\" USE='-zeroconf' emerge --update --newuse distcc $quiet_flag"
-    local hosts_cpplzo=$(echo "$distcc_hosts" | sed 's/\([^ ]\+\) \(localhost\|[^ ]\+\)/\1,lzo \2/g')
-    chroot_call "distcc-config --set-hosts '$hosts_cpplzo'"
+    # local hosts_cpplzo=$(echo "$distcc_hosts" | sed 's/\([^ ]\+\) \(localhost\|[^ ]\+\)/\1,lzo \2/g')
+    chroot_call "distcc-config --set-hosts '$distcc_hosts'"
     update_distcc_host
 
     # Add features for distcc and getbinpkg
@@ -705,6 +714,10 @@ setup_network() {
 
 setup_main_repo() {
     # Silences warnings before emerge-webrsync was run.
+    if [ $quick_install = true ]; then
+        run_extra_scripts ${FUNCNAME[0]}
+        return
+    fi
     chroot_call 'mkdir -p /var/db/repos/gentoo'
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -722,6 +735,7 @@ setup_root_password() {
 setup_locales() {
     # Add locales.
     local path_make_conf="$path_chroot/etc/locale.gen"
+    echo "C.UTF8 UTF-8" | try tee "$path_make_conf" >/dev/null
     for ((i = 0; i < "${#locales[@]}"; i++)); do
         echo "${locales[$i]}" | try tee -a "$path_make_conf" >/dev/null
     done
@@ -733,7 +747,9 @@ setup_locales() {
 }
 
 setup_portage_repository() {
-    chroot_call "emerge-webrsync $quiet_flag"
+    if [ ! $quick_install = true ]; then
+        chroot_call "emerge-webrsync $quiet_flag"
+    fi
     if [ $sync_portage = true ]; then
         chroot_call "emerge --sync $quiet_flag"
     fi
