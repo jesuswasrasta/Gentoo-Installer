@@ -4,7 +4,6 @@
 
 dir="$(pwd)" # Current directory where script was called from.
 branch="main"
-url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
 path_tmp="$dir/_gentoo_tmp_files" # Temporary files storage directory.
 path_chroot="$dir/_gentoo_chroot" # Gentoo chroot environment directory.
 quiet_flag='--quiet'              # Quiet flag used to silence the output.
@@ -246,7 +245,6 @@ read_variables() {
             shift
             if [ $# -gt 0 ]; then
                 branch="$1"
-                url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
             fi
             ;;
         --sync-portage)
@@ -291,6 +289,7 @@ read_variables() {
         esac
         shift
     done
+    url_repo="https://raw.githubusercontent.com/damiandudycz/Gentoo-Installer/$branch"
     run_extra_scripts ${FUNCNAME[0]}
 }
 
@@ -752,7 +751,7 @@ setup_cpu_flags() {
         run_extra_scripts ${FUNCNAME[0]}
         return
     fi
-    chroot_call "FEATURES=\"-distcc\" emerge --update --newuse cpuid2cpuflags $quiet_flag"
+    chroot_call "FEATURES=\"-distcc\" emerge --update --newuse cpuid2cpuflags -1 $quiet_flag"
     chroot_call 'echo "*/* $(cpuid2cpuflags)" > /etc/portage/package.use/00cpu-flags'
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -803,14 +802,14 @@ install_updates() {
 
 install_base_tools() {
     for package in "${guest_base_tools[@]}"; do
-        chroot_call "FEATURES=\"-distcc\" emerge --update --newuse $package $quiet_flag"
+        chroot_call "FEATURES=\"-distcc\" emerge --update --newuse --deep $package $quiet_flag"
     done
     run_extra_scripts ${FUNCNAME[0]}
 }
 
 install_other_tools() {
     for package in "${guest_tools[@]}"; do
-        chroot_call "emerge --update --newuse $package $quiet_flag"
+        chroot_call "emerge --update --newuse --deep $package $quiet_flag"
     done
     run_extra_scripts ${FUNCNAME[0]}
 }
