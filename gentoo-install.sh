@@ -8,7 +8,6 @@ path_tmp="$dir/_gentoo_tmp_files" # Temporary files storage directory.
 path_chroot="$dir/_gentoo_chroot" # Gentoo chroot environment directory.
 quiet_flag='--quiet'              # Quiet flag used to silence the output.
 quiet_flag_short='-q'             # Quiet flag used to silence the output.
-ssh_distcc_host_timeout=600       # Timeout for SSH when updating distcc host configuration.
 ssh_distcc_host_user='root'       # Username for SSH when updating distcc host configuration. Can change with --distcc-user flag.
 quick_install=false
 
