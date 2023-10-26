@@ -1,7 +1,7 @@
 # Gentoo-Installer
 Automatic installer and configurator of Gentoo linux for various platforms.
 
-To install on the PS3, boot into any recent linux dostribution, setup the date and networking and:
+To install on the PS3, boot into any recent linux distribution, setup the date and networking and:
 
 To install on the whole drive:
 `./gentoo-install.sh --device /dev/ps3dd --config ps3 --verbose`
