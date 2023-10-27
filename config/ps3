@@ -48,7 +48,6 @@ export -A make_conf=(
     [COMMON_FLAGS]='-O2 -pipe -mcpu=cell -mtune=cell -mabi=altivec -maltivec -mno-string -mno-update -mno-multiple'
     [MAKEOPTS]='-j6 -l2'
     [ACCEPT_LICENSE]='*'
-    [USE]='ps3 zeroconf mdnsresponder-compat -qt5 -qt6 wayland'
     [USE]='ps3 zeroconf mdnsresponder-compat'
     [VIDEO_CARDS]='fbdev'
     [INPUT_DEVICES]='evdev'
@@ -58,7 +57,7 @@ export -A make_conf=(
 ## Packages and tools ---------------------------------------------------------------------------
 
 export -A package_use=(
-    # [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
+    [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
     # [99sys-kernel_linux-headers]="sys-kernel/linux-headers headers-only"
 )
 
@@ -106,4 +105,4 @@ export -A extra_scripts=(
 )
 
 # NOTE: Fat limitations, probably due to petitboot version:
-# ext4 doest work. GPT us unsupported. Suggest using dos/ext3
+# ext4 doest work. GPT us unsupported. Suggest using dos/ext3.

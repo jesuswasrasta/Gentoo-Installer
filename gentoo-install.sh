@@ -913,9 +913,8 @@ summary() {
 }
 
 # TODO: Wireless networking configuration
-# TODO: Custom repos usage, including binpkg
+# TODO: Custom repos usage
 # TODO: Users add scripts
-# TODO: Quick install flag - stage4
 # TODO: GIT repository from binpkg's
 
 # TODO: Automatic configuration of helper tools:
