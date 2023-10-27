@@ -59,7 +59,7 @@ export -A make_conf=(
 
 export -A package_use=(
     # [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
-    [99sys-kernel_linux-headers]="sys-kernel/linux-headers headers-only"
+    # [99sys-kernel_linux-headers]="sys-kernel/linux-headers headers-only"
 )
 
 export -A package_accept_keywords=(

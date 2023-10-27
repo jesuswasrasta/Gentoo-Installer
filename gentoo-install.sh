@@ -9,7 +9,7 @@ path_chroot="$dir/_gentoo_chroot" # Gentoo chroot environment directory.
 quiet_flag='--quiet'              # Quiet flag used to silence the output.
 quiet_flag_short='-q'             # Quiet flag used to silence the output.
 ssh_distcc_host_user='root'       # Username for SSH when updating distcc host configuration. Can change with --distcc-user flag.
-quick_install=false
+fast=false
 
 # MAIN PROGRAM ==================================================================================
 
@@ -153,7 +153,7 @@ print_usage() {
     echo "  --password <password>             Set root user password."
     echo "  --hostname <hostname>             Set hostname."
     echo ""
-    echo "  --quick-install [NOT IMPLEMENTED] Performs faster method of installation, using stage4 tarball. Some options are not available in this mode."
+    echo "  --fast [NOT IMPLEMENTED]          Performs faster method of installation, using stage4 tarball. Some options are not available in this mode."
     echo ""
     echo "  --verbose                         Enable verbose output."
     echo ""
@@ -225,8 +225,8 @@ read_variables() {
             unset quiet_flag_short
             verbose_flag="--verbose"
             ;;
-        --quick-install)
-            quick_install=true
+        --fast)
+            fast=true
             ;;
         --distcc)
             shift
@@ -393,8 +393,7 @@ get_config() {
 }
 
 validate_config() {
-    # TODO: Validate more settings.
-    # Check if distcc is added to features.
+    # TODO: Validate settings.
     run_extra_scripts ${FUNCNAME[0]}
 }
 
@@ -530,8 +529,8 @@ disk_mount_partitions() {
 gentoo_download() {
     local url_gentoo_tarball
     local path_download="$path_tmp/gentoo.tar.xz"
-    if [ $quick_install = true ]; then
-            url_gentoo_tarball="$url_repo/stage4/$config.tar.xz"
+    if [ $fast = true ]; then
+        url_gentoo_tarball="$url_repo/stage4/$config.tar.xz"
     else
         local stageinfo_url="$base_url_autobuilds/latest-stage3.txt"
         local latest_gentoo_content="$(wget -q -O - "$stageinfo_url" --no-http-keep-alive --no-cache --no-cookies)"
@@ -635,6 +634,9 @@ setup_hostname() {
 }
 
 setup_distcc_client() {
+    # Generate SSH key to be inserted in helper hosts. Also used by sshd on guest.
+    chroot_call 'ssh-keygen -q -t rsa -N "" <<< $"\ny" >/dev/null 2>&1'
+
     if [ -z "$distcc_hosts" ]; then
         run_extra_scripts ${FUNCNAME[0]}
         return
@@ -648,9 +650,6 @@ setup_distcc_client() {
 
     # Add features for distcc and getbinpkg
     chroot_call 'echo FEATURES="${FEATURES} distcc getbinpkg" >> /etc/portage/make.conf'
-
-    # Generate SSH key to be inserted in helper hosts.
-    chroot_call 'ssh-keygen -q -t rsa -N "" <<< $"\ny" >/dev/null 2>&1'
 
     for distcc_host in ${distcc_hosts[@]}; do
         if [ "$distcc_host" != 'localhost' ]; then
@@ -714,10 +713,6 @@ setup_network() {
 
 setup_main_repo() {
     # Silences warnings before emerge-webrsync was run.
-    if [ $quick_install = true ]; then
-        run_extra_scripts ${FUNCNAME[0]}
-        return
-    fi
     chroot_call 'mkdir -p /var/db/repos/gentoo'
     run_extra_scripts ${FUNCNAME[0]}
 }
@@ -747,7 +742,7 @@ setup_locales() {
 }
 
 setup_portage_repository() {
-    if [ ! $quick_install = true ]; then
+    if [ $fast = false ]; then
         chroot_call "emerge-webrsync $quiet_flag"
     fi
     if [ $sync_portage = true ]; then
@@ -870,8 +865,11 @@ unprepare_chroot() {
 }
 
 disk_unmount_partitions() {
-    # TODO: For manual installation, umount /proc, /run, /dev, etc.
     if [ "$installation_type" != 'disk' ]; then
+
+        try umount -l $path_chroot/dev{/shm,/pts,}
+        try umount $path_chroot/{sys,proc}
+
         run_extra_scripts ${FUNCNAME[0]}
         return
     fi
@@ -899,7 +897,6 @@ disk_unmount_partitions() {
 }
 
 cleanup_directories() {
-    # TODO: Verify if tmp directory is empty before deleting
     try rm -rf "$path_tmp"
     if [ "$installation_type" = 'disk' ]; then
         try rm -rf "$path_chroot"
