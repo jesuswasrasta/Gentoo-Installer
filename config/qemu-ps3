@@ -58,9 +58,7 @@ export -A make_conf=(
 ## Packages and tools ---------------------------------------------------------------------------
 
 export -A package_use=(
-    # [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
-    [99sys-kernel_linux-headers]="sys-kernel/linux-headers headers-only"
-    [xorg]='x11-base/xorg-server udev'
+    [00cpu-flags]='*/* CPU_FLAGS_PPC: altivec'
 )
 
 export -A package_accept_keywords=(
@@ -102,7 +100,7 @@ export -a guest_init_scripts=(
 # Additional platform-specific scripts, incjected after given primary function finishes successfully.
 export -A extra_scripts=(
     [stage3_extract]='setup_host_qemu_for_ps3_copy_qemu'
-    [setup_distcc_client]='install_kernel_ps3'
+    [gentoo_extract]='install_kernel_ps3'
     # [install_other_tools]='install_custom_init_scripts'
     # [setup_autostart]='setup_bootloader_config'
 )
