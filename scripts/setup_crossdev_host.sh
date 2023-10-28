@@ -46,7 +46,7 @@ echo 'PKG_CONFIG_PATH="${ROOT}usr/lib/pkgconfig/"' >> "$path_makeconf"
 path_use="$path_chroot/usr/powerpc64-unknown-linux-gnu/etc/portage/package.use"
 echo '*/* CPU_FLAGS_PPC: altivec' >> "$path_use"
 
-path_accept="$path_chroot/usr/powerpc64-unknown-linux-gnu/etc/portage/package.use"
+path_accept="$path_chroot/usr/powerpc64-unknown-linux-gnu/etc/portage/package.accept_keywords"
 echo 'app-misc/neofetch ~ppc64' >> "$path_accept"
 echo 'app-misc/ps3pf_utils ~ppc64' >> "$path_accept"
 echo 'net-misc/sshpass ~ppc64' >> "$path_accept"
