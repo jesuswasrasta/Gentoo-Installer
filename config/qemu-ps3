@@ -99,8 +99,8 @@ export -a guest_init_scripts=(
 
 # Additional platform-specific scripts, incjected after given primary function finishes successfully.
 export -A extra_scripts=(
-    [stage3_extract]='setup_host_qemu_for_ps3_copy_qemu'
-    [gentoo_extract]='install_kernel_ps3'
+    [gentoo_extract]='install_kernel_ps3 setup_host_qemu_for_ps3_copy_qemu'
+    #[gentoo_extract]='install_kernel_ps3'
     # [install_other_tools]='install_custom_init_scripts'
     # [setup_autostart]='setup_bootloader_config'
 )
