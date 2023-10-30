@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Installs special pre-built version of kernel for the PS3.
+# This script should later be replaced with installation from custom portage repository.
+
 # TODO: Install with custom repository.
 if [ ! -n "$kernel_version" ]; then
     return

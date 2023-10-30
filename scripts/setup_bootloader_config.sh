@@ -1,5 +1,8 @@
 #!/bin.bash
 
+# Configures bootloader using specified device configuration from config.
+# Works with petitboot, grub and grub-efi.
+
 if [ "$installation_type" != 'disk' ]; then
     log green 'Skipping bootloader configuration due to directory installation'
     return

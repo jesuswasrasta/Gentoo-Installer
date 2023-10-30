@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Configure host crossdev environment and add targets.
+# Configures host crossdev environment.
+# Creates and configures crossdev targets.
 
 chroot_call 'mkdir -p /var/db/repos/crossdev/{profiles,metadata}'
 chroot_call 'chown -R portage:portage /var/db/repos/crossdev'
@@ -52,4 +53,4 @@ echo 'app-misc/ps3pf_utils ~ppc64' >> "$path_accept"
 echo 'net-misc/sshpass ~ppc64' >> "$path_accept"
 echo '=sys-kernel/linux-headers-6.5-r1 ~ppc64' >> "$path_accept"
 
-# TODO: Maybe add default portage configuration, make.conf here.
+# TODO: Build and upload exe_wrapper to path_chroot/usr/powerpc64-unknown-linux-gnu/usr/bin, plus register it in qemu on this host
